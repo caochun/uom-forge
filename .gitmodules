@@ -1,0 +1,3 @@
+[submodule "src/components/evidence/qq-doc-clone"]
+	path = src/components/evidence/qq-doc-clone
+	url = git@github.com:caochun/qq-doc-clone.git

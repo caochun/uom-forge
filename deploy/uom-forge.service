@@ -1,0 +1,15 @@
+[Unit]
+Description=UOM Forge domain modeling workbench
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Develop/uom-forge
+EnvironmentFile=%h/Develop/uom-forge/.env
+Environment=PATH=/home/chun/.nvm/versions/node/v22.22.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+ExecStart=/home/chun/.nvm/versions/node/v22.22.2/bin/node /home/chun/.nvm/versions/node/v22.22.2/lib/node_modules/npm/bin/npm-cli.js run dev -- --host 0.0.0.0 --port 6543
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

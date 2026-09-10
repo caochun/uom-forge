@@ -1,0 +1,44 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { readSse } from './document.ts'
+import {
+  discussionText,
+  isStageResult,
+  parseAnalysisEvent,
+} from './responses.ts'
+import type { AnalysisEvent } from '../shared/analysis.ts'
+
+test('frontend consumes typed SSE split inside UTF-8 and detects a mismatched stage result', async () => {
+  const data =
+    'data: {"type":"delta","text":"业务说明"}\n\ndata: {"type":"result","result":{"narrative":"模型自述"}}'
+  const bytes = new TextEncoder().encode(data)
+  const response = new Response(
+    new ReadableStream({
+      start(controller) {
+        for (let i = 0; i < bytes.length; i += 2)
+          controller.enqueue(bytes.slice(i, i + 2))
+        controller.close()
+      },
+    }),
+  )
+  const events: AnalysisEvent[] = []
+  await readSse(response, (event) => events.push(event))
+  assert.deepEqual(events[0], { type: 'delta', text: '业务说明' })
+  const last = events.at(-1)
+  assert.ok(last?.type === 'result')
+  assert.equal(isStageResult('narrate', last.result), true)
+  assert.equal(isStageResult('understand', last.result), false)
+})
+test('malformed transport envelopes and discussion failures are reported explicitly', () => {
+  assert.throws(
+    () => parseAnalysisEvent({ type: 'delta', text: 42 }),
+    /无效事件/,
+  )
+  assert.throws(
+    () => parseAnalysisEvent({ type: 'result', result: null }),
+    /无效事件/,
+  )
+  assert.throws(() => discussionText({ error: '调用失败' }), /调用失败/)
+  assert.throws(() => discussionText({}), /没有返回文本/)
+  assert.equal(discussionText({ text: '业务解释' }), '业务解释')
+})

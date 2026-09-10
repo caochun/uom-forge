@@ -18,12 +18,12 @@ const { values } = parseArgs({
   options: {
     input: { type: 'string' },
     output: { type: 'string' },
-    provider: { type: 'string', default: 'codex' },
+    provider: { type: 'string', default: 'deepseek' },
   },
 })
 if (!values.input || !values.output)
   throw new Error(
-    'Usage: npx tsx scripts/compare-understanding.ts --input input.json --output output-directory [--provider codex|deepseek]',
+    'Usage: npx tsx scripts/compare-understanding.ts --input input.json --output output-directory [--provider deepseek|gpt]',
   )
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

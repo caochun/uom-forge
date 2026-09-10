@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { buildModel, compileModel } from '../server/stages/modeling.ts'
-import { runProviderTurn } from '../server/providers/index.ts'
+import { runProviderTurn, resolveProvider } from '../server/providers/index.ts'
 import type { ModelingInput, ProviderEvent } from '../shared/analysis.ts'
 import type { RunTurn } from '../server/providers/types.ts'
 import type { StageOptions } from '../server/stages/contracts.ts'
@@ -15,15 +15,14 @@ const { values } = parseArgs({
   options: {
     input: { type: 'string' },
     'semantic-plan': { type: 'string' },
-    provider: { type: 'string', default: 'codex' },
+    provider: { type: 'string', default: 'deepseek' },
   },
 })
 if (Boolean(values.input) === Boolean(values['semantic-plan']))
   throw new Error(
-    'Specify --input input.json OR --semantic-plan plan.md [--provider codex|deepseek]',
+    'Specify --input input.json OR --semantic-plan plan.md [--provider deepseek|gpt]',
   )
-if (values.provider !== 'codex' && values.provider !== 'deepseek')
-  throw new Error('Unknown provider')
+const provider = resolveProvider(values.provider)
 const savedPlan = values['semantic-plan']
   ? await readFile(values['semantic-plan'], 'utf8')
   : null
@@ -82,7 +81,7 @@ try {
     }
   }
   const options: StageOptions = {
-    provider: values.provider,
+    provider,
     onEvent: (event) => {
       events.push({ ms: Date.now() - started, ...event })
       if (event.type === 'phase') console.log(`[${event.part}] ${event.text}`)

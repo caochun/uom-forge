@@ -2,6 +2,7 @@ import type { CandidateModel } from '../../shared/model.ts'
 import type { RunTurn } from '../providers/types.ts'
 import type { StageOptions } from './contracts.ts'
 import { ANALYST_INSTRUCTIONS } from './prompts.ts'
+import { modelContext } from './model-context.ts'
 
 export function modelNarrativePrompt(model: CandidateModel) {
   return `${ANALYST_INSTRUCTIONS}
@@ -11,7 +12,7 @@ export function modelNarrativePrompt(model: CandidateModel) {
 如果模型无法支持某个完整业务过程，请直接说明“模型未表达”，不要自行补全。
 输出一段结构清晰的中文 Markdown，供用户从语言角度审阅候选模型；不要输出 JSON、代码围栏或引文。
 候选模型：
-${JSON.stringify(model || null)}`
+${JSON.stringify(modelContext(model))}`
 }
 
 export async function narrateModel(

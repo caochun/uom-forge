@@ -1,35 +1,60 @@
-import { evidence } from './model-schema.ts'
+import { CLARIFICATION_SCHEMA } from './clarifications.ts'
+const evidence = { type: 'array', maxItems: 0 }
+
+const text = { type: 'string', minLength: 1, pattern: '\\S' }
+const status = { enum: ['supported', 'partial', 'missing'] }
 
 export const ASSESSMENT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['summary', 'processAssessments', 'recommendations', 'questions'],
+  required: [
+    'summary',
+    'processAssessments',
+    'recommendations',
+    'clarifications',
+  ],
   properties: {
-    summary: { type: 'string' },
+    summary: text,
     processAssessments: {
       type: 'array',
       items: {
         type: 'object',
-        required: [
-          'processId',
-          'processName',
-          'status',
-          'coveredElements',
-          'gaps',
-          'evidence',
-        ],
+        required: ['processId', 'processName', 'reason', 'requirements'],
         additionalProperties: false,
         properties: {
-          processId: { type: 'string' },
-          processName: { type: 'string' },
-          status: { enum: ['supported', 'partial', 'missing'] },
-          coveredElements: { type: 'array', items: { type: 'string' } },
-          gaps: { type: 'array', items: { type: 'string' } },
+          processId: text,
+          processName: text,
+          reason: text,
+          requirements: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: [
+                'requirement',
+                'status',
+                'elements',
+                'explanation',
+                'gap',
+                'suggestion',
+              ],
+              properties: {
+                requirement: text,
+                status,
+                elements: { type: 'array', uniqueItems: true, items: text },
+                explanation: text,
+                gap: { type: 'string' },
+                suggestion: { type: 'string' },
+                evidence,
+              },
+            },
+          },
           evidence,
         },
       },
     },
     recommendations: { type: 'array', items: { type: 'string' } },
-    questions: { type: 'array', items: { type: 'string' } },
+    clarifications: { type: 'array', items: CLARIFICATION_SCHEMA },
   },
 }

@@ -23,7 +23,11 @@ export function parseAnalysisEvent(value: unknown): AnalysisEvent {
         return value as AnalysisEvent
       break
     case 'model-plan':
-      if (typeof value.semanticPlan === 'string' && value.part === 'semantic')
+      if (
+        typeof value.semanticPlan === 'string' &&
+        value.part === 'semantic' &&
+        Array.isArray(value.clarifications)
+      )
         return value as AnalysisEvent
       break
     case 'understanding-narrative':
@@ -40,8 +44,8 @@ export function isStageResult<S extends AnalysisStage>(
 ): result is AnalysisResults[S] {
   const fields = {
     understand: ['understanding'],
-    model: ['semanticPlan', 'model'],
-    compile: ['semanticPlan', 'model'],
+    model: ['semanticPlan', 'model', 'clarifications'],
+    compile: ['semanticPlan', 'model', 'clarifications'],
     narrate: ['narrative'],
     assess: ['assessment'],
   } as const

@@ -85,7 +85,7 @@ const candidate = (): CandidateModel => ({
       ],
     },
   ],
-  questions: [],
+  boundaries: [],
 })
 
 test('semantic turn and compiler have isolated inputs; stream and result preserve the plan', async () => {
@@ -119,7 +119,7 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
     },
     async (prompt, options) => {
       prompts.push(prompt)
-      assert.equal(options.provider, 'codex')
+      assert.equal(options.provider, 'gpt')
       assert.doesNotMatch(prompt, /DOCUMENT_CANARY|SOURCE_CANARY|QUOTE_CANARY/)
       if (prompts.length === 1) {
         assert.match(prompt, /NARRATIVE_ONLY/)
@@ -140,7 +140,7 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
       options.onEvent?.({ type: 'delta', text: JSON.stringify(candidate()) })
       return JSON.stringify(candidate())
     },
-    { provider: 'codex', onEvent: (event) => events.push(event) },
+    { provider: 'gpt', onEvent: (event) => events.push(event) },
   )
   assert.equal(prompts.length, 2)
   assert.equal(result.semanticPlan, semanticPlan)
@@ -310,6 +310,6 @@ test('confirmation choices preserve commas and distinguish multiple selection fr
 
 test('prompts contain no sample domain vocabulary or source evidence requirement in semantic step', () => {
   const semantic = semanticModelPrompt({ narrative: '测试输入' })
-  assert.doesNotMatch(semantic, /供电|馈线|主变|融资租赁|高速|blockId|逐字/)
+  assert.doesNotMatch(semantic, /供电|馈线|主变|融资租赁|高速|blockId/)
   assert.doesNotMatch(compileModelPrompt('PLAN'), /DOCUMENT/)
 })

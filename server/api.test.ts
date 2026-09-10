@@ -64,18 +64,19 @@ test('HTTP and SSE reject malformed inputs before invoking inference', async () 
 test('reading emits SSE to completion; a consumed request body does not cancel inference', async () => {
   const { server, url } = await serve(async (prompt, options) => {
     assert.match(prompt, /DOCUMENT_ONLY/)
+    assert.equal(options.provider, 'gpt')
     assert.equal(options.signal?.aborted, false)
     options.onEvent?.({
       type: 'timing',
       timing: {
         callId: 'reading-call',
-        provider: 'codex',
+        provider: 'gpt',
         model: 'test-model',
         startedAt: new Date().toISOString(),
         promptCharacters: prompt.length,
         outputCharacters: 0,
         elapsedMs: 3,
-        sessionReadyMs: 3,
+        connectedMs: 3,
         status: 'running',
       },
     })
@@ -85,10 +86,15 @@ test('reading emits SSE to completion; a consumed request body does not cancel i
   try {
     const response = await post(url + '/api/analyze/stream', {
       stage: 'understand',
-      provider: 'codex',
+      provider: 'gpt',
       document: { name: 'doc', blocks: [{ id: '1', text: 'DOCUMENT_ONLY' }] },
     })
     const output = events(await response.text())
+    assert.ok(
+      output.some(
+        (event) => event.type === 'phase' && event.text.includes('GPT API'),
+      ),
+    )
     assert.ok(
       output.some(
         (event) => event.type === 'delta' && event.part === 'reading',
@@ -100,7 +106,8 @@ test('reading emits SSE to completion; a consumed request body does not cancel i
         (event) =>
           event.type === 'timing' &&
           event.part === 'reading' &&
-          event.timing.sessionReadyMs === 3,
+          event.timing.provider === 'gpt' &&
+          event.timing.connectedMs === 3,
       ),
     )
     assert.equal(output.at(-1)?.type, 'result')
@@ -141,6 +148,31 @@ test('SSE disconnect aborts an active inference call', async () => {
     await response.body?.getReader().read()
     controller.abort()
     await aborted
+  } finally {
+    await close(server)
+  }
+})
+
+test('discussion uses GPT and all API routes reject disabled ACP before inference', async () => {
+  let calls = 0
+  const { server, url } = await serve(async (_prompt, options) => {
+    calls++
+    assert.equal(options.provider, 'gpt')
+    return '讨论结果'
+  })
+  try {
+    const response = await post(url + '/api/discuss', {
+      provider: 'gpt',
+      document: { name: 'doc', blocks: [{ id: '1', text: 'DOCUMENT_ONLY' }] },
+      messages: [{ role: 'user', content: '解释业务边界' }],
+    })
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), { text: '讨论结果' })
+    for (const route of ['/api/analyze', '/api/analyze/stream', '/api/discuss']) {
+      const disabled = await post(url + route, { provider: 'codex' })
+      assert.match(await disabled.text(), /ACP 已停用/)
+    }
+    assert.equal(calls, 1)
   } finally {
     await close(server)
   }

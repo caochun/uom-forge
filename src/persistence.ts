@@ -1,8 +1,10 @@
 import type {
   Assessment,
   Question,
+  SupportStatus,
   TurnTiming,
   Understanding,
+  BusinessClarification,
 } from '../shared/analysis.ts'
 import type {
   CandidateModel,
@@ -12,6 +14,7 @@ import type {
 } from '../shared/model.ts'
 import type { Project, SemanticPlan } from './types.ts'
 import { isRecord, number, record, records, strings, text } from './values.ts'
+import { reviseUnderstanding } from './understanding.ts'
 
 const stages = ['understand', 'model', 'compile', 'narrate', 'assess'] as const
 const evidence = (value: unknown): Evidence[] =>
@@ -53,8 +56,9 @@ function properties(value: unknown): Property[] {
 // every JSON value as an already typed Project or discarding the user's draft.
 function readModel(value: unknown): CandidateModel | null {
   if (!isRecord(value) || !Array.isArray(value.objects)) return null
+  const { questions: _questions, ...semantic } = value
   return {
-    ...value,
+    ...semantic,
     schemaVersion: '1',
     name: text(value.name, '已有候选模型'),
     summary: text(value.summary),
@@ -106,7 +110,7 @@ function readModel(value: unknown): CandidateModel | null {
         }),
       ),
     })),
-    questions: strings(value.questions),
+    boundaries: strings(value.boundaries),
   }
 }
 function readUnderstanding(value: unknown): Understanding | null {
@@ -122,6 +126,21 @@ function readUnderstanding(value: unknown): Understanding | null {
             text: text(question.text),
             options: strings(question.options),
             multiple: question.multiple === true,
+            clarification:
+              isRecord(question.clarification) &&
+              ['model', 'assess'].includes(
+                String(question.clarification.source),
+              )
+                ? {
+                    source:
+                      question.clarification.source === 'model'
+                        ? 'model'
+                        : 'assess',
+                    basis: text(question.clarification.basis),
+                    ambiguity: text(question.clarification.ambiguity),
+                    impact: text(question.clarification.impact),
+                  }
+                : undefined,
           },
         ]
       })
@@ -135,21 +154,46 @@ function readUnderstanding(value: unknown): Understanding | null {
 }
 function readAssessment(value: unknown): Assessment | null {
   if (!isRecord(value)) return null
+  const { questions: _questions, ...assessment } = value
+  const status = (value: unknown): SupportStatus =>
+    value === 'supported' || value === 'missing' ? value : 'partial'
   return {
-    ...value,
+    ...assessment,
     summary: text(value.summary),
     recommendations: strings(value.recommendations),
-    questions: strings(value.questions),
+    clarifications: records(value.clarifications).map(
+      (item): BusinessClarification => ({
+        text: text(item.text),
+        basis: text(item.basis),
+        ambiguity: text(item.ambiguity),
+        impact: text(item.impact),
+        options: strings(item.options),
+        multiple: item.multiple === true,
+      }),
+    ),
+    historicalQuestions: [
+      ...new Set([
+        ...strings(value.historicalQuestions),
+        ...strings(value.questions),
+      ]),
+    ],
     processAssessments: records(value.processAssessments).map((item) => ({
       ...item,
       processId: text(item.processId),
       processName: text(item.processName),
-      status:
-        item.status === 'supported' || item.status === 'missing'
-          ? item.status
-          : 'partial',
-      coveredElements: strings(item.coveredElements),
-      gaps: strings(item.gaps),
+      status: status(item.status),
+      // Preserve old conclusions, but never invent a requirement/element mapping.
+      reason: text(item.reason, strings(item.gaps).join('；')),
+      requirements: records(item.requirements).map((requirement) => ({
+        ...requirement,
+        requirement: text(requirement.requirement),
+        status: status(requirement.status),
+        elements: strings(requirement.elements),
+        explanation: text(requirement.explanation),
+        gap: text(requirement.gap),
+        suggestion: text(requirement.suggestion),
+        evidence: evidence(requirement.evidence),
+      })),
       evidence: evidence(item.evidence),
     })),
   }
@@ -171,7 +215,9 @@ function readTimings(value: unknown): Project['timings'] {
     result[stage] = records(source[stage]).flatMap((item) => {
       if (
         typeof item.callId !== 'string' ||
-        (item.provider !== 'codex' && item.provider !== 'deepseek')
+        (item.provider !== 'codex' &&
+          item.provider !== 'deepseek' &&
+          item.provider !== 'gpt')
       )
         return []
       const status: TurnTiming['status'] =
@@ -227,7 +273,10 @@ export function restoreProject(value: unknown, empty: Project): Project {
           ),
         })
       : null
-  const understanding = readUnderstanding(value.understanding)
+  const savedUnderstanding = record(value.understanding)
+  const reading =
+    readUnderstanding(savedUnderstanding.source) ||
+    readUnderstanding(value.understanding)
   const plan = readPlan(current ? value.plan : value.modelingState)
   const revision = record(value.revisions)
   const document = record(value.document)
@@ -239,6 +288,25 @@ export function restoreProject(value: unknown, empty: Project): Project {
     if (typeof answer === 'string') answers[Number(key)] = answer
     else if (Array.isArray(answer)) answers[Number(key)] = strings(answer)
   }
+  const savedAnswers: Project['answers'] = {}
+  for (const [key, answer] of Object.entries(
+    record(savedUnderstanding.confirmedAnswers),
+  )) {
+    if (!/^\d+$/.test(key)) continue
+    if (typeof answer === 'string') savedAnswers[Number(key)] = answer
+    else if (Array.isArray(answer)) savedAnswers[Number(key)] = strings(answer)
+  }
+  // Upgrade already-saved confirmations locally, preserving uncommitted edits.
+  const understanding = reading
+    ? reviseUnderstanding(
+        reading,
+        isRecord(savedUnderstanding.source)
+          ? savedAnswers
+          : value.questionsSaved === true
+            ? answers
+            : {},
+      )
+    : null
   const nullableNumber = (
     value: unknown,
     fallback: number | null,
@@ -267,6 +335,14 @@ export function restoreProject(value: unknown, empty: Project): Project {
         model: model ? 1 : 0,
       }
   const outputs: Project['outputs'] = {}
+  const priorModel = record(current ? candidate.model : value)
+  if (
+    (understanding &&
+      understanding.narrative !== savedUnderstanding.narrative) ||
+    (strings(priorModel.questions).length > 0 &&
+      !Array.isArray(priorModel.boundaries))
+  )
+    revisions.business += 1
   const rawOutputs = record(value.outputs)
   for (const stage of stages)
     if (typeof rawOutputs[stage] === 'string')
@@ -297,6 +373,12 @@ export function restoreProject(value: unknown, empty: Project): Project {
           revision: number(candidate.revision, 1),
           documentRevision: number(candidate.documentRevision),
           edited: candidate.edited === true,
+          historicalQuestions: [
+            ...new Set([
+              ...strings(candidate.historicalQuestions),
+              ...strings(record(current ? candidate.model : value).questions),
+            ]),
+          ],
         }
       : null,
     answers,

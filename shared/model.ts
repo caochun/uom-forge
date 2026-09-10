@@ -67,7 +67,7 @@ export interface CandidateModel {
   functions: BusinessFunction[]
   rules: Rule[]
   activities: Activity[]
-  questions: string[]
+  boundaries: string[]
 }
 
 export const MODEL_COLLECTIONS = [

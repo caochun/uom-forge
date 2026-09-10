@@ -129,10 +129,18 @@ readline.createInterface({input:process.stdin}).on('line', line => {
     const output=JSON.stringify({cwd:process.cwd(),config:JSON.parse(process.env.CODEX_CONFIG),prompt:message.params.prompt});
     write({method:'session/update',params:{update:{sessionUpdate:'agent_message_chunk',content:{text:output}}}});
     if(process.env.FORGE_TEST_MODE==='exit') setImmediate(()=>process.exit(2));
+    else if(process.env.FORGE_TEST_MODE==='empty') setInterval(()=>write({method:'session/update',params:{update:{sessionUpdate:'agent_message_chunk',content:{text:''}}}}),10);
+    else if(process.env.FORGE_TEST_MODE==='stream') {
+      let chunks=0;
+      const timer=setInterval(()=>{
+        write({method:'session/update',params:{update:{sessionUpdate:'agent_message_chunk',content:{text:'.'}}}});
+        if(++chunks===12) {clearInterval(timer);write({id:3,result:{stopReason:'end_turn'}});}
+      },50);
+    }
     else if(process.env.FORGE_TEST_MODE!=='stall') write({id:3,result:{stopReason:'end_turn'}});
   }
 });`
-const codex = (mode = '') =>
+const codex = (mode = '', overrides: NodeJS.ProcessEnv = {}) =>
   createCodexProvider(
     { command: process.execPath, args: ['-e', fakeAcp] },
     {
@@ -142,6 +150,7 @@ const codex = (mode = '') =>
       CODEX_REASONING_EFFORT: '',
       CODEX_ACP_TIMEOUT_MS: '1500',
       FORGE_TEST_MODE: mode,
+      ...overrides,
     },
   )
 
@@ -155,6 +164,20 @@ test('Codex sends explicit model/effort and prompt; each call is isolated and cl
   assert.deepEqual(second.prompt, [{ type: 'text', text: 'second' }])
   for (const cwd of [first.cwd, second.cwd])
     await assert.rejects(access(cwd), { code: 'ENOENT' })
+})
+test('Codex keeps consuming an active stream beyond the first-output window', async () => {
+  const output = await codex('stream', {
+    CODEX_ACP_FIRST_OUTPUT_TIMEOUT_MS: '500',
+    CODEX_ACP_IDLE_TIMEOUT_MS: '300',
+    CODEX_ACP_TIMEOUT_MS: '5000',
+  })('input', {})
+  assert.ok(output.endsWith('.'.repeat(12)))
+})
+test('empty ACP chunks cannot keep a stalled response alive', async () => {
+  await assert.rejects(
+    codex('empty', { CODEX_ACP_IDLE_TIMEOUT_MS: '100' })('input', {}),
+    /输出中断/,
+  )
 })
 test('Codex partial process exit fails; user cancellation preserves the reason and cleans up', async () => {
   await assert.rejects(codex('exit')('input', {}), /完成响应前退出/)

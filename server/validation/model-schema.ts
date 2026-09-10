@@ -66,5 +66,5 @@ export const MODEL_SCHEMA = record({
       ),
     }),
   ),
-  questions: texts,
+  boundaries: texts,
 })

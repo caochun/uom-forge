@@ -45,13 +45,9 @@ export function parseAnalysisRequest(
         model: parseCandidateModel(input.model),
       }
     case 'assess':
-      validateDocument(input.document)
-      requireText(input.narrative, '业务说明')
       return {
         provider,
         stage: 'assess',
-        document: input.document,
-        narrative: input.narrative,
         model: parseCandidateModel(input.model),
       }
     default:

@@ -108,7 +108,6 @@ try {
       )
       try {
         const result = await readBusiness(document, provider, {
-          provider: 'codex',
           signal: controller.signal,
           onEvent(event) {
             const observedMs = Math.round(performance.now() - started)

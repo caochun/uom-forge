@@ -18,7 +18,7 @@ test('reads once, publishes the narrative and extracts optional questions', asyn
     document,
     async (prompt, options) => {
       prompts.push(prompt)
-      assert.equal(options.provider, 'codex')
+      assert.equal(options.provider, 'gpt')
       assert.ok(prompt.includes('DOC_ONLY_37'))
       assert.doesNotMatch(
         prompt,
@@ -31,7 +31,7 @@ test('reads once, publishes the narrative and extracts optional questions', asyn
       options.onEvent?.({ type: 'delta', text: narrative })
       return narrative
     },
-    { provider: 'codex', onEvent: (event) => events.push(event) },
+    { provider: 'gpt', onEvent: (event) => events.push(event) },
   )
   assert.equal(prompts.length, 1)
   assert.equal(result.understanding.narrative, narrative)

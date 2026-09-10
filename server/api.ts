@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AnalysisEvent } from '../shared/analysis.ts'
+import { PROVIDERS } from '../shared/analysis.ts'
 import type { RunTurn } from './providers/types.ts'
 import { runProviderTurn, resolveProvider } from './providers/index.ts'
 import { runStage } from './stages/index.ts'
@@ -88,7 +89,7 @@ export function createApiMiddleware(runTurn: RunTurn = runProviderTurn) {
         if (streaming)
           emit({
             type: 'phase',
-            text: `已收到阶段输入，准备启动 ${provider === 'codex' ? 'Codex ACP' : 'DeepSeek API'}。`,
+            text: `已收到阶段输入，准备启动 ${PROVIDERS[provider].label}。`,
           })
         invoked = true
         const result = await runStage(input, runTurn, {

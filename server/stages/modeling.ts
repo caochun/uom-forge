@@ -4,6 +4,10 @@ import { semanticModelPrompt, compileModelPrompt } from './prompts.ts'
 import type { ModelingInput, ModelingResult } from '../../shared/analysis.ts'
 import type { RunTurn } from '../providers/types.ts'
 import { scopedTurn, type StageOptions } from './contracts.ts'
+import {
+  containsBasis,
+  parseModelClarifications,
+} from '../../shared/clarifications.ts'
 
 export async function buildModel(
   input: ModelingInput,
@@ -24,8 +28,14 @@ export async function buildModel(
   )
   options.signal?.throwIfAborted()
   if (!semanticPlan.trim()) throw new Error('未返回建模说明。')
+  const clarifications = parseModelClarifications(semanticPlan)
+  for (const item of clarifications)
+    if (!containsBasis(input.narrative, item.basis))
+      throw new Error(
+        `业务澄清“${item.text}”的依据不在当前业务说明中。建模输出已保留，请检查后重新建模。`,
+      )
   // Publish before compilation so errors or cancellation cannot erase it.
-  report({ type: 'model-plan', part: 'semantic', semanticPlan })
+  report({ type: 'model-plan', part: 'semantic', semanticPlan, clarifications })
   options.signal?.throwIfAborted()
   return compileModel(semanticPlan, runTurn, options)
 }
@@ -41,6 +51,7 @@ export async function compileModel(
   if (semanticPlan.length > 120000)
     throw new Error('建模说明超过 12 万个字符，请先缩小建模范围。')
   options.signal?.throwIfAborted()
+  const clarifications = parseModelClarifications(semanticPlan)
   const report = options.onEvent || (() => {})
   report({ type: 'phase', part: 'compile', text: '正在整理候选模型。' })
   try {
@@ -59,6 +70,7 @@ export async function compileModel(
       model.activities.length
     return {
       semanticPlan,
+      clarifications,
       model,
       provenance: { basis: 'business-understanding', evidence: 'unlinked' },
       validation: {

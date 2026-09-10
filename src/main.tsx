@@ -24,7 +24,6 @@ import {
   DocumentView,
   Markdown,
   Notice,
-  RawOutput,
   ReviewView,
   TimingDetails,
 } from './components/WorkbenchViews.tsx'
@@ -36,6 +35,7 @@ import type {
   DiscussionRequest,
   ProviderId,
 } from '../shared/analysis.ts'
+import { PROVIDERS } from '../shared/analysis.ts'
 import type {
   AnalysisStage,
   DiscussionSubject,
@@ -51,6 +51,12 @@ import { restoreProject } from './persistence.ts'
 import { discussionText, isStageResult } from './responses.ts'
 import { isRecord } from './values.ts'
 import { createId } from './id.ts'
+import {
+  hasUnsavedAnswers,
+  reviseUnderstanding,
+  saveUnderstandingAnswers,
+  receiveClarifications,
+} from './understanding.ts'
 
 const STORAGE = 'uom-forge-project-v3'
 const EMPTY_DOCUMENT = {
@@ -71,7 +77,7 @@ const STAGES = {
   model: '建立候选模型',
   compile: '整理候选模型',
   narrate: '生成模型自述',
-  assess: '评估过程支撑',
+  assess: '评估业务过程支撑',
 }
 const EMPTY_PROJECT: Project = {
   version: 4,
@@ -92,7 +98,7 @@ const EMPTY_PROJECT: Project = {
     {
       role: 'assistant',
       content:
-        '上传业务文档后先理解业务。你可以审阅说明、补充问题答案，再开始建模。模型生成后，再通过自述和过程支撑检查其表达是否准确。',
+        '上传业务文档后先理解业务。你可以审阅说明、补充问题答案，再开始建模。模型生成后，再通过自述和业务过程支撑检查其表达是否准确。',
     },
   ],
 }
@@ -128,11 +134,7 @@ function App() {
   const [elapsed, setElapsed] = useState(0)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
-  const [provider, setProvider] = useState<ProviderId>(() =>
-    localStorage.getItem('uom-forge-provider') === 'codex'
-      ? 'codex'
-      : 'deepseek',
-  )
+  const [provider, setProvider] = useState<ProviderId>('deepseek')
   const busyRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
   const cancelled = useRef(false)
@@ -141,16 +143,33 @@ function App() {
   const followMessages = useRef(true)
   projectRef.current = project
   const stale = freshness(project.revisions)
+  const unsavedAnswers = hasUnsavedAnswers(project)
+  const pendingQuestions = project.understanding?.questions.length || 0
+  const openQuestions = () => {
+    setView('understanding')
+    setEditing(false)
+    window.setTimeout(
+      () =>
+        document
+          .getElementById('business-questions')
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      0,
+    )
+  }
   const model = project.candidate?.model
-  const providerLabel = provider === 'codex' ? 'Codex ACP' : 'DeepSeek API'
+  const providerLabel = PROVIDERS[provider].label
   const currentLabel = PAGES.find(([id]) => id === view)?.[1]
   const canModel =
     Boolean(project.understanding?.narrative) &&
     !stale.understanding &&
+    !unsavedAnswers &&
     !editing
   const canRetry =
-    Boolean(project.plan?.complete && !project.plan?.compiled) && !stale.plan
-  const canCheck = Boolean(model) && !stale.candidate
+    Boolean(project.plan?.complete && !project.plan?.compiled) &&
+    !stale.plan &&
+    !unsavedAnswers
+  const canCheck =
+    Boolean(model) && !stale.candidate && !unsavedAnswers && !editing
   const addMessage = (message: WorkspaceMessage) =>
     setProject((current) => ({
       ...current,
@@ -375,11 +394,21 @@ function App() {
         }
       }
       if (event.type === 'model-plan')
-        setProject((current) => ({
-          ...current,
-          plan: { plan: event.semanticPlan, complete: true, compiled: false },
-          revisions: { ...current.revisions, planBasis: basis },
-        }))
+        setProject((current) =>
+          receiveClarifications(
+            {
+              ...current,
+              plan: {
+                plan: event.semanticPlan,
+                complete: true,
+                compiled: false,
+              },
+              revisions: { ...current.revisions, planBasis: basis },
+            },
+            event.clarifications,
+            'model',
+          ),
+        )
       if (event.type === 'error') throw new Error(event.error || '分析失败')
       if (event.type === 'result') received.result = event.result
     })
@@ -408,7 +437,7 @@ function App() {
       })
       setProject((current) => ({
         ...current,
-        understanding: result.understanding,
+        understanding: reviseUnderstanding(result.understanding),
         answers: {},
         questionsSaved: false,
         revisions: advanceRevision(current.revisions, 'understanding'),
@@ -420,40 +449,22 @@ function App() {
           '业务理解已完成。请审阅说明并补充待确认问题，再点击“开始建模”。',
       })
     })
-  const collectFeedback = () => {
-    const answers = (project.understanding?.questions || []).flatMap(
-      (question, index) => {
-        const answer = project.answers[index]
-        const text = Array.isArray(answer) ? answer.join('；') : answer
-        return text
-          ? [
-              (typeof question === 'string' ? question : question.text) +
-                '：' +
-                text,
-            ]
-          : []
-      },
-    )
-    return [
-      project.feedbackDocumentRevision === project.revisions.document
-        ? project.feedback
-        : '',
-      answers.length ? '用户确认的业务信息：\n' + answers.join('\n') : '',
-    ]
-      .filter(Boolean)
-      .join('\n\n')
-  }
   const build = (retry = false) =>
     execute(async () => {
       if (retry && !project.plan) throw new Error('请先完成建模说明')
       if (!retry && !project.understanding) throw new Error('请先理解业务')
+      if (unsavedAnswers)
+        throw new Error('请先保存问题答案，将补充说明并入业务理解。')
       const basis = project.revisions.business
       const result =
         retry && project.plan
           ? await runStage('compile', { semanticPlan: project.plan.plan })
           : await runStage('model', {
               narrative: project.understanding?.narrative || '',
-              instruction: collectFeedback(),
+              instruction:
+                project.feedbackDocumentRevision === project.revisions.document
+                  ? project.feedback
+                  : '',
               model:
                 project.candidate?.documentRevision ===
                 project.revisions.document
@@ -468,28 +479,34 @@ function App() {
           candidateBasis: basis,
           model: current.revisions.model + 1,
         }
-        return {
-          ...current,
-          plan: { plan: result.semanticPlan, complete: true, compiled: true },
-          candidate: {
-            model: result.model,
-            revision: revisions.model,
-            documentRevision: current.revisions.document,
+        return receiveClarifications(
+          {
+            ...current,
+            plan: { plan: result.semanticPlan, complete: true, compiled: true },
+            candidate: {
+              model: result.model,
+              revision: revisions.model,
+              documentRevision: current.revisions.document,
+            },
+            revisions,
           },
-          revisions,
-        }
+          result.clarifications,
+          'model',
+        )
       })
       setModelMode('model')
       setSelectedId(null)
       addMessage({
         role: 'assistant',
         content:
-          '候选模型已生成。可以检查对象关系与业务能力，或点击“检验模型”查看自述和过程支撑。',
+          '候选模型已生成。可以检查对象关系与业务能力，或点击“检验模型”查看自述和业务过程支撑。',
       })
     })
   const checkModel = (only?: 'assess' | 'narrate') =>
     execute(async () => {
-      if (!model || !project.understanding) throw new Error('请先生成候选模型')
+      if (!model) throw new Error('请先生成候选模型')
+      if (unsavedAnswers)
+        throw new Error('请先保存问题答案，并根据更新后的业务理解重新建模。')
       const basis = project.revisions.model
       if (only !== 'assess') {
         const result = await runStage('narrate', { model })
@@ -501,16 +518,18 @@ function App() {
         setNarratingText('')
       }
       if (only !== 'narrate') {
-        const result = await runStage('assess', {
-          document: project.document,
-          narrative: project.understanding.narrative,
-          model,
-        })
-        setProject((current) => ({
-          ...current,
-          assessment: result.assessment,
-          revisions: { ...current.revisions, assessmentBasis: basis },
-        }))
+        const result = await runStage('assess', { model })
+        setProject((current) =>
+          receiveClarifications(
+            {
+              ...current,
+              assessment: result.assessment,
+              revisions: { ...current.revisions, assessmentBasis: basis },
+            },
+            result.assessment.clarifications,
+            'assess',
+          ),
+        )
       }
       addMessage({
         role: 'assistant',
@@ -565,10 +584,17 @@ function App() {
     setAssistantOpen(true)
     setDraft('请解释“' + element.name + '”的业务含义与建模边界。')
   }
-  const selectFromReview = (id: string) => {
-    setView('model')
-    setModelMode('model')
-    setSelectedId(id)
+  const appendAssessmentFeedback = (text: string) => {
+    setProject((current) => {
+      if (current.feedback.includes(text)) return current
+      return {
+        ...current,
+        feedback: [current.feedback.trim(), text].filter(Boolean).join('\n\n'),
+        feedbackDocumentRevision: current.revisions.document,
+        revisions: advanceRevision(current.revisions, 'business'),
+      }
+    })
+    setToast('已加入下一轮建模反馈；审阅后再开始建模。')
   }
   const editElement: OnEdit = (kind, id, changes) =>
     setProject((current) => {
@@ -722,18 +748,15 @@ function App() {
         </div>
         <div className="topbar-actions">
           <div className="provider-switch" aria-label="推理提供方">
-            {(['deepseek', 'codex'] as const).map((value) => (
+            {(['deepseek', 'gpt'] as const).map((value) => (
               <button
                 key={value}
                 disabled={busy || discussing}
                 aria-pressed={provider === value}
                 className={provider === value ? 'active' : ''}
-                onClick={() => {
-                  setProvider(value)
-                  localStorage.setItem('uom-forge-provider', value)
-                }}
+                onClick={() => setProvider(value)}
               >
-                {value === 'codex' ? 'Codex' : 'DeepSeek'}
+                {PROVIDERS[value].name}
               </button>
             ))}
           </div>
@@ -800,7 +823,7 @@ function App() {
               {view === 'understanding' && project.understanding && (
                 <button
                   className="secondary-button"
-                  disabled={busy}
+                  disabled={busy || unsavedAnswers || stale.understanding}
                   onClick={() => {
                     setEditedNarrative(project.understanding?.narrative || '')
                     setEditing(!editing)
@@ -829,6 +852,32 @@ function App() {
               </button>
             </div>
           </div>
+          {unsavedAnswers && !stale.understanding && (
+            <Notice>
+              问题答案有尚未保存的修改。请先保存补充说明，再进行建模或评估；当前正文和讨论仍使用已保存的业务理解。
+              <button
+                className="text-button"
+                disabled={busy}
+                onClick={() => {
+                  setProject(saveUnderstandingAnswers)
+                  setToast('补充说明已并入业务理解，请根据更新后的说明建模。')
+                }}
+              >
+                保存并更新业务说明
+              </button>
+            </Notice>
+          )}
+          {(view === 'model' || view === 'review') &&
+            pendingQuestions > 0 &&
+            !stale.understanding && (
+              <Notice>
+                有 {pendingQuestions}{' '}
+                项业务信息待确认，统一在业务理解中处理。候选模型保留当前不确定边界；保存补充说明后需要重新建模。
+                <button className="text-button" onClick={openQuestions}>
+                  到业务理解确认
+                </button>
+              </Notice>
+            )}
           {job && (
             <div className="run-status" role="status">
               <span className="typing-indicator">
@@ -923,12 +972,11 @@ function App() {
                     if (!editedNarrative.trim()) return
                     setProject((current) => ({
                       ...current,
-                      understanding: {
-                        ...current.understanding,
+                      understanding: reviseUnderstanding({
                         narrative: editedNarrative,
                         questions: extractQuestions(editedNarrative),
                         warnings: [],
-                      },
+                      }),
                       answers: {},
                       questionsSaved: false,
                       revisions: advanceRevision(current.revisions, 'business'),
@@ -945,7 +993,7 @@ function App() {
                     onChange={(event) => setEditedNarrative(event.target.value)}
                   />
                   <p>
-                    保存后，已有模型和检验结果会标记需要更新。问题列表将重新解析，旧答案需重新确认。
+                    保存后，已有模型和检验结果会标记需要更新。已并入正文的确认说明会保留；待确认问题将按编辑后的内容重新解析。
                   </p>
                   <button
                     className="primary-button"
@@ -969,24 +1017,16 @@ function App() {
                       ...current,
                       answers: { ...current.answers, [index]: value },
                       questionsSaved: false,
-                      revisions: advanceRevision(current.revisions, 'business'),
                     }))
                   }
                   onSubmitAnswers={() => {
-                    setProject((current) => ({
-                      ...current,
-                      questionsSaved: true,
-                    }))
-                    setToast('补充信息已保存，开始建模时一并采用')
+                    setProject(saveUnderstandingAnswers)
+                    setToast(
+                      '补充说明已并入业务理解，请重新建模以更新后续检验的依据。',
+                    )
                   }}
                   questionsSubmitted={project.questionsSaved}
-                  isSubmitting={busy}
-                  outputRecord={
-                    <RawOutput
-                      output={project.outputs.understand}
-                      live={job?.stage === 'understand'}
-                    />
-                  }
+                  isSubmitting={busy || stale.understanding}
                 />
               )}
             </>
@@ -1024,7 +1064,6 @@ function App() {
                 onAdd={addObject}
                 disabled={busy}
                 runningPart={runPart}
-                raw={project.outputs.compile || project.outputs.model}
               />
             </>
           )}
@@ -1051,7 +1090,7 @@ function App() {
                   disabled={busy || !canCheck}
                   onClick={() => checkModel('assess')}
                 >
-                  仅评估过程支撑
+                  仅评估业务过程支撑
                 </button>
               </div>
               <ReviewView
@@ -1060,13 +1099,20 @@ function App() {
                 narration={narratingText || project.narration}
                 assessment={project.assessment}
                 running={job?.stage}
-                raw={
-                  project.outputs[
-                    reviewMode === 'narration' ? 'narrate' : 'assess'
-                  ]
-                }
                 model={model}
-                onSelect={selectFromReview}
+                onAddFeedback={appendAssessmentFeedback}
+                feedback={project.feedback}
+                feedbackDisabled={
+                  busy ||
+                  stale.understanding ||
+                  project.revisions.assessmentBasis !==
+                    project.revisions.model ||
+                  Boolean(
+                    project.feedback &&
+                      project.feedbackDocumentRevision !==
+                        project.revisions.document,
+                  )
+                }
                 onDiscuss={discussElement}
                 onCompare={() => setComparison(!comparison)}
                 comparison={comparison ? project.understanding?.narrative : ''}
@@ -1077,7 +1123,7 @@ function App() {
             <section className="feedback-panel panel-surface">
               <label htmlFor="model-feedback">下一轮建模反馈</label>
               <p>
-                明确要调整的业务含义和边界。讨论内容不会自动改动模型；这里的反馈和问题答案会一起用于重新建模。
+                明确要调整的业务含义和边界。讨论内容不会自动改动模型；重新建模时使用当前业务说明和这里的反馈。
               </p>
               {project.feedback &&
                 project.feedbackDocumentRevision !==

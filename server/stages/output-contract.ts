@@ -9,5 +9,5 @@ Function = Element + { targets: objectId[], inputs: [], output: string }
 Rule = Element + { elements: elementId[] }
 Requirement = { description: string, elements: elementId[], status: "partial", reason: "待支撑评估", evidence: [] }
 Activity = { id: string, name: string, goal: string, evidence: [], requirements: Requirement[] }
-Model = { schemaVersion: "1", name: string, summary: string, objects: Object[], relations: Relation[], actions: Action[], functions: Function[], rules: Rule[], activities: Activity[], questions: string[] }
+Model = { schemaVersion: "1", name: string, summary: string, objects: Object[], relations: Relation[], actions: Action[], functions: Function[], rules: Rule[], activities: Activity[], boundaries: string[] }
 “+”代表将字段展开到同一对象内。objectId 引用 objects 中的 id；elementId 引用本模型已有元素 id。字符串非空。`

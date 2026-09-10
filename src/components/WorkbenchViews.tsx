@@ -7,9 +7,12 @@ import {
   Upload,
   X,
 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import Markdown from './Markdown.tsx'
+export { default as Markdown } from './Markdown.tsx'
+import BusinessProcessSupport from './BusinessProcessSupport.tsx'
+import { modelingContent } from '../../shared/clarifications.ts'
 import QQDocEditor from 'qq-doc-clone'
+import ModelGraph from './ModelGraph.tsx'
 import { documentToHtml } from '../document.ts'
 import { relatedElements } from '../workspace.ts'
 import type { ReactNode } from 'react'
@@ -30,15 +33,6 @@ import type {
   WorkspaceDocument,
 } from '../types.ts'
 
-export function Markdown({ children }: { children?: string }) {
-  return (
-    <div className="narrative-body">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-        {children || ''}
-      </ReactMarkdown>
-    </div>
-  )
-}
 export function Switcher<T extends string>({
   label,
   items,
@@ -64,23 +58,6 @@ export function Switcher<T extends string>({
         </button>
       ))}
     </div>
-  )
-}
-export function RawOutput({
-  output,
-  live,
-}: {
-  output?: string
-  live: boolean
-}) {
-  if (!output && !live) return null
-  return (
-    <details className="live-stage-output panel-surface">
-      <summary>
-        原始输出记录 <small>{live ? '正在接收' : '保留完整输出'}</small>
-      </summary>
-      <pre>{output || '等待输出…'}</pre>
-    </details>
   )
 }
 export function TimingDetails({
@@ -247,7 +224,6 @@ interface CandidateViewProps {
   onAdd: (name: string, description: string) => void
   disabled: boolean
   runningPart?: StagePart | ''
-  raw?: string
 }
 export function CandidateView({
   candidate,
@@ -261,7 +237,6 @@ export function CandidateView({
   onAdd,
   disabled,
   runningPart,
-  raw,
 }: CandidateViewProps) {
   const [collection, setCollection] = useState<CollectionTab>('objects')
   const [adding, setAdding] = useState(false)
@@ -330,7 +305,7 @@ export function CandidateView({
             </span>
           </div>
           {plan?.plan ? (
-            <Markdown>{plan.plan}</Markdown>
+            <Markdown>{modelingContent(plan.plan)}</Markdown>
           ) : (
             <div className="empty-state">
               {runningPart
@@ -429,14 +404,7 @@ export function CandidateView({
             <div className="model-surface panel-surface">
               {collection === 'objects' ? (
                 <>
-                  <div className="panel-toolbar">
-                    <h3>对象及业务联系</h3>
-                    <span className="muted">
-                      {model.objects.length} 个对象 · {model.relations.length}{' '}
-                      条关系
-                    </span>
-                  </div>
-                  <Graph
+                  <ModelGraph
                     model={model}
                     selectedId={selectedId}
                     onSelect={select}
@@ -500,177 +468,22 @@ export function CandidateView({
               />
             )}
           </div>
-          {model.questions.length > 0 && (
-            <details className="panel-surface model-questions">
-              <summary>模型中的待确认事项 · {model.questions.length}</summary>
-              <ul>
-                {model.questions.map((question, index) => (
-                  <li key={index}>{question}</li>
-                ))}
-              </ul>
-              <button
-                className="text-button"
-                onClick={() =>
-                  onDiscuss({
-                    name: '模型待确认事项',
-                    description: model.questions.join('\n'),
-                  })
-                }
-              >
-                与助手讨论
-              </button>
-            </details>
-          )}
         </>
       )}
-      <RawOutput output={raw} live={Boolean(runningPart)} />
+      {!!candidate?.historicalQuestions?.length && (
+        <details className="panel-surface model-questions">
+          <summary>旧版待确认事项 · 仅供查看</summary>
+          <p>
+            这些问题尚未按“依据、歧义、模型影响”核验，不会作为下一轮建模输入。请重新建模整理当前边界。
+          </p>
+          <ul>
+            {candidate.historicalQuestions.map((question, index) => (
+              <li key={index}>{question}</li>
+            ))}
+          </ul>
+        </details>
+      )}
     </section>
-  )
-}
-
-function Graph({
-  model,
-  selectedId,
-  onSelect,
-}: {
-  model: CandidateModel
-  selectedId: string | null
-  onSelect: (id: string) => void
-}) {
-  const columns = Math.max(
-    1,
-    Math.min(3, Math.ceil(Math.sqrt(model.objects.length))),
-  )
-  const width = Math.max(640, columns * 245)
-  const height = Math.max(
-    380,
-    Math.ceil(model.objects.length / columns) * 165 + 60,
-  )
-  const positions = new Map(
-    model.objects.map((item, index) => [
-      item.id,
-      {
-        x: 122 + (index % columns) * 245,
-        y: 85 + Math.floor(index / columns) * 165,
-      },
-    ]),
-  )
-  return (
-    <div className="graph-canvas">
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        style={{ minWidth: Math.min(width, 735) }}
-        role="group"
-        aria-label="对象关系图"
-      >
-        <defs>
-          <marker
-            id="edge-arrow"
-            markerWidth="8"
-            markerHeight="8"
-            refX="7"
-            refY="4"
-            orient="auto"
-          >
-            <path d="M0,0 L8,4 L0,8" fill="#8d9eb4" />
-          </marker>
-        </defs>
-        {model.relations.map((item, index) => {
-          const from = positions.get(item.from)
-          const to = positions.get(item.to)
-          if (!from || !to) return null
-          const dx = to.x - from.x
-          const dy = to.y - from.y
-          const ratio = Math.min(
-            88 / (Math.abs(dx) || 1),
-            30 / (Math.abs(dy) || 1),
-          )
-          const start = { x: from.x + dx * ratio, y: from.y + dy * ratio }
-          const end = { x: to.x - dx * ratio, y: to.y - dy * ratio }
-          const duplicateIndex = model.relations
-            .slice(0, index)
-            .filter(
-              (relation) =>
-                (relation.from === item.from && relation.to === item.to) ||
-                (relation.from === item.to && relation.to === item.from),
-            ).length
-          const offset = duplicateIndex * 30
-          const cx = (start.x + end.x) / 2 + (dy ? 26 + offset : 0)
-          const cy = (start.y + end.y) / 2 - (dx ? 26 + offset : 0)
-          const self = item.from === item.to
-          const d = self
-            ? `M ${from.x + 60} ${from.y - 30} C ${from.x + 130} ${from.y - 100}, ${from.x - 130} ${from.y - 100}, ${from.x - 60} ${from.y - 30}`
-            : `M${start.x} ${start.y} Q${cx} ${cy} ${end.x} ${end.y}`
-          return (
-            <g
-              key={item.id}
-              className={`graph-edge ${selectedId === item.id ? 'active' : ''}`}
-              role="button"
-              aria-label={`${item.name}：${model.objects.find((entry) => entry.id === item.from)?.name}到${model.objects.find((entry) => entry.id === item.to)?.name}`}
-              tabIndex={0}
-              onClick={() => onSelect(item.id)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  onSelect(item.id)
-                }
-              }}
-            >
-              <path className="edge-hit" d={d} />
-              <path className="edge-line" d={d} markerEnd="url(#edge-arrow)" />
-              <text
-                x={self ? from.x : (start.x + 2 * cx + end.x) / 4}
-                y={self ? from.y - 78 : (start.y + 2 * cy + end.y) / 4 - 5}
-              >
-                {item.name}
-              </text>
-            </g>
-          )
-        })}
-        {model.objects.map((item) => {
-          const position = positions.get(item.id)
-          if (!position) return null
-          const { x, y } = position
-          const lines = item.name.match(/.{1,12}/gu) || []
-          return (
-            <g
-              key={item.id}
-              className={`graph-node ${selectedId === item.id ? 'active' : ''}`}
-              transform={`translate(${x},${y})`}
-              role="button"
-              aria-label={item.name}
-              tabIndex={0}
-              onClick={() => onSelect(item.id)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  onSelect(item.id)
-                }
-              }}
-            >
-              <rect
-                x="-88"
-                y="-30"
-                width="176"
-                height={Math.max(60, lines.length * 18 + 16)}
-                rx="9"
-              />
-              <text textAnchor="middle">
-                {lines.map((line, index) => (
-                  <tspan
-                    key={index}
-                    x="0"
-                    y={index * 18 + (lines.length === 1 ? 5 : -4)}
-                  >
-                    {line}
-                  </tspan>
-                ))}
-              </text>
-            </g>
-          )
-        })}
-      </svg>
-    </div>
   )
 }
 
@@ -862,10 +675,11 @@ export function ReviewView({
   onMode,
   narration,
   assessment,
-  raw,
   running,
   model,
-  onSelect,
+  onAddFeedback,
+  feedback,
+  feedbackDisabled,
   onDiscuss,
   onCompare,
   comparison,
@@ -874,24 +688,15 @@ export function ReviewView({
   onMode: (mode: ReviewViewMode) => void
   narration: string
   assessment: Assessment | null
-  raw?: string
   running?: AnalysisStage
   model?: CandidateModel
-  onSelect: (id: string) => void
+  onAddFeedback: (text: string) => void
+  feedback: string
+  feedbackDisabled: boolean
   onDiscuss: OnDiscuss
   onCompare: () => void
   comparison?: string
 }) {
-  const all = model
-    ? [
-        ...model.objects,
-        ...model.relations,
-        ...model.actions,
-        ...model.functions,
-        ...model.rules,
-      ]
-    : []
-  const rows = assessment?.processAssessments || []
   return (
     <section className="review-view">
       <div className="view-toolbar">
@@ -899,7 +704,7 @@ export function ReviewView({
           label="模型检验方式"
           items={[
             ['narration', '模型自述'],
-            ['assessment', '过程支撑'],
+            ['assessment', '业务过程支撑'],
           ]}
           value={mode}
           onChange={onMode}
@@ -946,115 +751,16 @@ export function ReviewView({
           </article>
         </div>
       ) : (
-        <>
-          {assessment?.summary && (
-            <article className="panel-surface">
-              <Markdown>{assessment.summary}</Markdown>
-            </article>
-          )}
-          {rows.length ? (
-            rows.map((row, index) => (
-              <article
-                className="process-card panel-surface"
-                key={row.processId || index}
-              >
-                <div className="panel-toolbar">
-                  <h3>{row.processName}</h3>
-                  <span className={`badge ${row.status}`}>
-                    {{
-                      supported: '可支撑',
-                      partial: '部分支撑',
-                      missing: '存在缺口',
-                    }[row.status] || '待评估'}
-                  </span>
-                </div>
-                <div className="detail-body">
-                  <div className="element-chips">
-                    {row.coveredElements?.map((id) => (
-                      <button key={id} onClick={() => onSelect(id)}>
-                        {all.find((item) => item.id === id)?.name || id}
-                      </button>
-                    ))}
-                  </div>
-                  {row.gaps?.length > 0 && (
-                    <ul>
-                      {row.gaps.map((gap, i) => (
-                        <li key={i}>{gap}</li>
-                      ))}
-                    </ul>
-                  )}
-                  <button
-                    className="text-button"
-                    onClick={() =>
-                      onDiscuss({
-                        name: row.processName,
-                        description:
-                          (row.gaps || []).join('；') ||
-                          '检查当前模型对该业务过程的支撑情况。',
-                      })
-                    }
-                  >
-                    讨论此过程
-                  </button>
-                </div>
-              </article>
-            ))
-          ) : (
-            <div className="empty-state panel-surface">
-              {running === 'assess'
-                ? '正在检查模型对业务过程的支撑情况…'
-                : '还没有过程支撑评估。'}
-            </div>
-          )}
-        </>
+        <BusinessProcessSupport
+          assessment={assessment}
+          running={running === 'assess'}
+          model={model}
+          onDiscuss={onDiscuss}
+          onAddFeedback={onAddFeedback}
+          feedback={feedback}
+          disabled={feedbackDisabled}
+        />
       )}
-      {mode === 'assessment' && assessment && (
-        <>
-          {assessment.recommendations?.length > 0 && (
-            <article className="panel-surface">
-              <div className="panel-toolbar">
-                <h3>建议调整</h3>
-              </div>
-              <div className="detail-body">
-                <ul>
-                  {assessment.recommendations.map((text, index) => (
-                    <li key={index}>{text}</li>
-                  ))}
-                </ul>
-                <button
-                  className="text-button"
-                  onClick={() =>
-                    onDiscuss({
-                      name: '模型改进建议',
-                      description: assessment.recommendations.join('\n'),
-                    })
-                  }
-                >
-                  讨论改进建议
-                </button>
-              </div>
-            </article>
-          )}
-          {assessment.questions?.length > 0 && (
-            <article className="panel-surface">
-              <div className="panel-toolbar">
-                <h3>仍需确认</h3>
-              </div>
-              <div className="detail-body">
-                <ul>
-                  {assessment.questions.map((text, index) => (
-                    <li key={index}>{text}</li>
-                  ))}
-                </ul>
-              </div>
-            </article>
-          )}
-        </>
-      )}
-      <RawOutput
-        output={raw}
-        live={running === (mode === 'narration' ? 'narrate' : 'assess')}
-      />
     </section>
   )
 }

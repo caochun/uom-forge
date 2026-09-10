@@ -1,20 +1,25 @@
 import type { ProviderId } from '../../shared/analysis.ts'
 import type { RunTurn } from './types.ts'
-import { createCodexProvider } from './codex.ts'
+// ACP is disabled in the application; retain the adapter for manual experiments.
+// import { createCodexProvider } from './codex.ts'
 import { createDeepSeekProvider } from './deepseek.ts'
+import { createGptProvider } from './gpt.ts'
 
 export function resolveProvider(
   value: unknown = process.env.UOM_LLM_PROVIDER || 'deepseek',
 ): ProviderId {
-  if (value !== 'codex' && value !== 'deepseek')
+  if (value === 'codex')
+    throw new Error('Codex ACP 已停用，请选择 DeepSeek 或 GPT。')
+  if (value !== 'gpt' && value !== 'deepseek')
     throw new Error('不支持的推理提供方。')
   return value
 }
-const codex = createCodexProvider()
-const deepseek = createDeepSeekProvider()
+// const codex = createCodexProvider()
+const providers: Record<ProviderId, RunTurn> = {
+  deepseek: createDeepSeekProvider(),
+  gpt: createGptProvider(),
+}
 export const runProviderTurn: RunTurn = (prompt, options = {}) => {
   options.signal?.throwIfAborted()
-  return resolveProvider(options.provider) === 'codex'
-    ? codex(prompt, options)
-    : deepseek(prompt, options)
+  return providers[resolveProvider(options.provider)](prompt, options)
 }

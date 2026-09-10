@@ -1,12 +1,16 @@
 import { Check, CircleAlert } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { ReactNode } from 'react'
-import type { Understanding } from '../../shared/analysis.ts'
-import type { QuestionAnswer, QuestionAnswers } from '../types.ts'
+import type {
+  QuestionAnswer,
+  QuestionAnswers,
+  ReviewedUnderstanding,
+} from '../types.ts'
+import { withoutQuestionSection } from '../../shared/questions.ts'
+import { answerText, sameAnswer } from '../understanding.ts'
 
 interface Props {
-  understanding: Understanding | null
+  understanding: ReviewedUnderstanding | null
   stream: { narrative: string; complete: boolean; part: string }
   questionAnswers: QuestionAnswers
   onQuestionAnswerChange: (index: number, answer: QuestionAnswer) => void
@@ -14,7 +18,6 @@ interface Props {
   questionsSubmitted: boolean
   isSubmitting: boolean
   isLive: boolean
-  outputRecord: ReactNode
 }
 
 export default function BusinessUnderstanding({
@@ -26,19 +29,19 @@ export default function BusinessUnderstanding({
   questionsSubmitted,
   isSubmitting,
   isLive,
-  outputRecord,
 }: Props) {
   const narrative = stream.narrative || understanding?.narrative || ''
-  const questions = (
-    isLive || stream.narrative ? [] : understanding?.questions || []
-  ).map((question) =>
-    typeof question === 'string' ? { text: question, options: [] } : question,
-  )
+  const questions =
+    isLive || stream.narrative ? [] : understanding?.source.questions || []
+  const confirmedAnswers = understanding?.confirmedAnswers || {}
+  const confirmedCount = Object.keys(confirmedAnswers).length
   const status = isLive
     ? '正在阅读与解释'
     : narrative && !stream.complete && !understanding?.narrative
       ? '说明尚未完成'
-      : '业务说明原文'
+      : confirmedCount
+        ? '已补充确认说明'
+        : '当前业务说明'
   return (
     <section className="understanding-view">
       {(narrative || isLive) && (
@@ -54,7 +57,7 @@ export default function BusinessUnderstanding({
             {narrative ? (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {questions.length
-                  ? narrative.replace(/^##\s+待确认问题[\s\S]*$/m, '')
+                  ? withoutQuestionSection(narrative)
                   : narrative}
               </ReactMarkdown>
             ) : (
@@ -72,7 +75,7 @@ export default function BusinessUnderstanding({
           </div>
           {!isLive && narrative && (
             <p className="reading-note">
-              这份说明是后续建模的唯一业务理解依据。待确认问题会在下方单独列出。
+              这份说明是后续建模的业务依据。保存问题答案会更新正文；已确认语义需要进入候选模型，再由模型自述和业务过程支撑检验。
             </p>
           )}
         </article>
@@ -95,14 +98,16 @@ export default function BusinessUnderstanding({
         </div>
       )}
       {questions.length > 0 && (
-        <div className="questions-panel panel-surface">
+        <div className="questions-panel panel-surface" id="business-questions">
           <div className="questions-panel-heading">
             <div className="questions-heading-icon">
               <CircleAlert size={15} />
             </div>
             <div>
-              <strong>待确认问题</strong>
-              <p>补充这些信息后，将带入候选模型阶段。</p>
+              <strong>问题确认</strong>
+              <p>
+                可以只回答部分问题。保存后并入业务说明，未回答的问题继续保留。
+              </p>
             </div>
             <span
               className={
@@ -111,7 +116,8 @@ export default function BusinessUnderstanding({
                   : 'question-status'
               }
             >
-              {questionsSubmitted ? '已提交' : `${questions.length} 项`}
+              {confirmedCount} 已确认 · {questions.length - confirmedCount}{' '}
+              待确认
             </span>
           </div>
           <div className="question-form">
@@ -120,6 +126,33 @@ export default function BusinessUnderstanding({
                 <span>{index + 1}</span>
                 <div>
                   <strong>{question.text}</strong>
+                  <small className="question-answer-state">
+                    {!sameAnswer(
+                      questionAnswers[index],
+                      confirmedAnswers[index],
+                    )
+                      ? '修改尚未保存'
+                      : answerText(confirmedAnswers[index])
+                        ? '已并入业务说明'
+                        : '待确认'}
+                  </small>
+                  {question.clarification && (
+                    <div className="question-context">
+                      <span className="stage-badge">
+                        {question.clarification.source === 'model'
+                          ? '建模发现'
+                          : '评估发现'}
+                      </span>
+                      <dl>
+                        <dt>依据</dt>
+                        <dd>{question.clarification.basis}</dd>
+                        <dt>歧义</dt>
+                        <dd>{question.clarification.ambiguity}</dd>
+                        <dt>对模型的影响</dt>
+                        <dd>{question.clarification.impact}</dd>
+                      </dl>
+                    </div>
+                  )}
                   {question.options?.length > 0 ? (
                     <div className="question-options">
                       {question.options.map((option) => (
@@ -159,6 +192,7 @@ export default function BusinessUnderstanding({
                   ) : (
                     <textarea
                       rows={2}
+                      aria-label={question.text}
                       value={questionAnswers?.[index] || ''}
                       onChange={(event) =>
                         onQuestionAnswerChange(index, event.target.value)
@@ -166,6 +200,21 @@ export default function BusinessUnderstanding({
                       placeholder="填写你的确认或补充"
                       disabled={isSubmitting}
                     />
+                  )}
+                  {answerText(questionAnswers[index]) && (
+                    <button
+                      type="button"
+                      className="text-button question-clear"
+                      disabled={isSubmitting}
+                      onClick={() =>
+                        onQuestionAnswerChange(
+                          index,
+                          question.multiple ? [] : '',
+                        )
+                      }
+                    >
+                      清除答案
+                    </button>
                   )}
                 </div>
               </div>
@@ -179,7 +228,7 @@ export default function BusinessUnderstanding({
                   String(questionAnswers?.[index] || '').trim(),
                 ).length
               }{' '}
-              / {questions.length} · 开始建模时采用当前答案
+              / {questions.length} · 保存后更新业务说明
             </small>
             <button
               className="secondary-button"
@@ -193,7 +242,6 @@ export default function BusinessUnderstanding({
           </div>
         </div>
       )}
-      {outputRecord}
     </section>
   )
 }

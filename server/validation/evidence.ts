@@ -1,5 +1,4 @@
 import type { BusinessDocument } from '../../shared/analysis.ts'
-import type { Evidence } from '../../shared/model.ts'
 import { isRecord } from './values.ts'
 
 const normalize = (text: string) => text.replace(/\s+/g, '')
@@ -36,23 +35,4 @@ export function validateEvidence(
   for (const [key, child] of Object.entries(value))
     if (key !== 'evidence')
       validateEvidence(child, document, `${location}.${key}`)
-}
-
-// Correct an assessment's block id only when the exact quotation is found.
-export function groundCitations(
-  citations: Evidence[],
-  document: BusinessDocument,
-): Evidence[] {
-  return citations.flatMap((citation) => {
-    const quote = normalize(citation.quote)
-    if (!quote) return []
-    const requested = document.blocks.find(
-      (block) => block.id === citation.blockId,
-    )
-    const block =
-      requested && normalize(requested.text).includes(quote)
-        ? requested
-        : document.blocks.find((item) => normalize(item.text).includes(quote))
-    return block ? [{ blockId: block.id, quote: citation.quote }] : []
-  })
 }

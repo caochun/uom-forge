@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
 import type { RunTurn } from './types.ts'
-import { createDeadline, timeoutFromEnv } from './lifetime.ts'
+import { createProgressDeadline, timeoutFromEnv } from './lifetime.ts'
 import { isRecord } from '../validation/values.ts'
 import { createTurnTiming } from './timing.ts'
 
@@ -42,10 +42,14 @@ export function createCodexProvider(
       prompt,
       options.onEvent,
     )
-    const deadline = createDeadline(
+    const deadline = createProgressDeadline(
       options.signal,
-      timeoutFromEnv(env.CODEX_ACP_TIMEOUT_MS),
-      'Codex ACP 请求',
+      {
+        firstOutputMs: timeoutFromEnv(env.CODEX_ACP_FIRST_OUTPUT_TIMEOUT_MS),
+        idleMs: timeoutFromEnv(env.CODEX_ACP_IDLE_TIMEOUT_MS, 90000),
+        totalMs: timeoutFromEnv(env.CODEX_ACP_TIMEOUT_MS, 900000),
+      },
+      'Codex ACP',
     )
     let cwd: string
     try {
@@ -149,8 +153,10 @@ export function createCodexProvider(
                 isRecord(update) &&
                 update.sessionUpdate === 'agent_message_chunk' &&
                 isRecord(update.content) &&
-                typeof update.content.text === 'string'
+                typeof update.content.text === 'string' &&
+                update.content.text
               ) {
+                deadline.output()
                 text += update.content.text
                 timing.output(update.content.text)
                 options.onEvent?.({

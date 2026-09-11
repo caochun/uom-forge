@@ -68,6 +68,7 @@ test('GPT resolves configuration per call, isolates provider parameters and emit
       model: 'configured-deepseek',
       stream: true,
       thinking: { type: 'disabled' },
+      max_tokens: 16384,
       messages: [{ role: 'user', content: 'third turn' }],
     },
   })

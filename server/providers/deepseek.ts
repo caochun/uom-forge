@@ -11,6 +11,11 @@ export function createDeepSeekProvider(
     const url = env.LLM_API_URL
     if (!apiKey || !url)
       throw new Error('DeepSeek 未配置 LLM_API_KEY 或 LLM_API_URL。')
+    // Candidate JSON can be large; reserve enough room for validation rather
+    // than allowing the provider to truncate a structurally valid model.
+    const maxTokens = Number(env.LLM_MAX_OUTPUT_TOKENS || 16384)
+    if (!Number.isSafeInteger(maxTokens) || maxTokens < 1)
+      throw new Error('LLM_MAX_OUTPUT_TOKENS 必须为正整数。')
     return {
       provider: 'deepseek',
       label: 'DeepSeek',
@@ -18,7 +23,7 @@ export function createDeepSeekProvider(
       url,
       model: env.LLM_MODEL || 'deepseek-chat',
       timeoutMs: timeoutFromEnv(env.LLM_API_TIMEOUT_MS),
-      parameters: { thinking: { type: 'disabled' } },
+      parameters: { thinking: { type: 'disabled' }, max_tokens: maxTokens },
     }
   }, fetcher)
 }

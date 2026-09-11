@@ -26,7 +26,12 @@ export async function runStage(
         configured,
       )
     case 'compile':
-      return compileModel(request.semanticPlan, runTurn, configured)
+      return compileModel(
+        request.semanticPlan,
+        request.narrative,
+        runTurn,
+        configured,
+      )
     case 'narrate':
       return narrateModel(request.model, runTurn, configured)
     case 'assess':

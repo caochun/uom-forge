@@ -11,6 +11,9 @@ export function scopedTurn(
 ): TurnOptions {
   return {
     ...options,
+    ...(['compile', 'expression', 'repair', 'recheck'].includes(part)
+      ? { outputFormat: 'json' as const }
+      : {}),
     onEvent: (event) => options.onEvent?.({ ...event, part }),
   }
 }

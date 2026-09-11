@@ -1,6 +1,7 @@
 import type { ProviderEvent, ProviderId } from '../../shared/analysis.ts'
 
 export interface TurnOptions {
+  outputFormat?: 'json'
   provider?: ProviderId
   signal?: AbortSignal
   onEvent?: (event: ProviderEvent) => void

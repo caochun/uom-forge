@@ -15,6 +15,13 @@ import type {
 import type { Project, SemanticPlan } from './types.ts'
 import { isRecord, number, record, records, strings, text } from './values.ts'
 import { reviseUnderstanding } from './understanding.ts'
+import type { ExpressionCase, ExpressionReview } from '../shared/expression.ts'
+import {
+  EXPRESSION_STATUS,
+  interruptReview,
+  STAGE_PART_LABELS,
+} from '../shared/expression.ts'
+import type { StagePart } from '../shared/analysis.ts'
 
 const stages = ['understand', 'model', 'compile', 'narrate', 'assess'] as const
 const evidence = (value: unknown): Evidence[] =>
@@ -205,7 +212,76 @@ function readPlan(value: unknown): SemanticPlan | null {
     plan: text(value.plan),
     complete: value.complete === true,
     compiled: value.compiled === true,
+    warnings: strings(value.warnings),
   }
+}
+function readExpressionReview(value: unknown): ExpressionReview | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.status !== 'string' ||
+    !(value.status in EXPRESSION_STATUS)
+  )
+    return undefined
+  const snapshots: ExpressionReview['snapshots'] = records(
+    value.snapshots,
+  ).flatMap((snapshot) => {
+    const model = readModel(snapshot.model)
+    if (!model) return []
+    const check =
+      isRecord(snapshot.check) && Array.isArray(snapshot.check.cases)
+        ? {
+            summary: text(snapshot.check.summary),
+            warnings: strings(snapshot.check.warnings),
+            cases: records(snapshot.check.cases).map(
+              (item): ExpressionCase => ({
+                id: text(item.id),
+                fact: text(item.fact),
+                basis: text(item.basis),
+                basisIds: strings(item.basisIds),
+                scenario: text(item.scenario),
+                status:
+                  item.status === 'expressed' || item.status === 'defect'
+                    ? item.status
+                    : 'uncertain',
+                elements: strings(item.elements),
+                explanation: text(item.explanation),
+                gap: text(item.gap),
+                suggestion: text(item.suggestion),
+              }),
+            ),
+            clarifications: records(snapshot.check.clarifications).map(
+              (item): BusinessClarification => ({
+                text: text(item.text),
+                basis: text(item.basis),
+                ambiguity: text(item.ambiguity),
+                impact: text(item.impact),
+                options: strings(item.options),
+                multiple: item.multiple === true,
+              }),
+            ),
+          }
+        : undefined
+    return [{ model, check }]
+  })
+  if (!snapshots.length) return undefined
+  return interruptReview({
+    status: value.status as ExpressionReview['status'],
+    snapshots,
+    selectedSnapshot:
+      Number.isInteger(value.selectedSnapshot) &&
+      number(value.selectedSnapshot) >= 0 &&
+      number(value.selectedSnapshot) < snapshots.length
+        ? number(value.selectedSnapshot)
+        : snapshots.length - 1,
+    changes: records(value.changes).map((change) => ({
+      collection: text(change.collection),
+      id: text(change.id),
+      value: change.value,
+      caseIds: strings(change.caseIds),
+      reason: text(change.reason),
+    })),
+    warnings: strings(value.warnings),
+  })
 }
 function readTimings(value: unknown): Project['timings'] {
   const source = record(value)
@@ -245,10 +321,8 @@ function readTimings(value: unknown): Project['timings'] {
           firstTextMs: optionalNumber(item.firstTextMs),
           status,
           part:
-            item.part === 'reading' ||
-            item.part === 'semantic' ||
-            item.part === 'compile'
-              ? item.part
+            typeof item.part === 'string' && item.part in STAGE_PART_LABELS
+              ? (item.part as StagePart)
               : undefined,
         },
       ]
@@ -373,6 +447,13 @@ export function restoreProject(value: unknown, empty: Project): Project {
           revision: number(candidate.revision, 1),
           documentRevision: number(candidate.documentRevision),
           edited: candidate.edited === true,
+          ...(candidate.expressionReview
+            ? {
+                expressionReview: readExpressionReview(
+                  candidate.expressionReview,
+                ),
+              }
+            : {}),
           historicalQuestions: [
             ...new Set([
               ...strings(candidate.historicalQuestions),

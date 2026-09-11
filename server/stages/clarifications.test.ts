@@ -6,6 +6,7 @@ import {
   containsBasis,
   modelingContent,
   parseModelClarifications,
+  reviewModelClarifications,
 } from '../../shared/clarifications.ts'
 import type { CandidateModel } from '../../shared/model.ts'
 import type { StageEvent } from '../../shared/analysis.ts'
@@ -32,6 +33,24 @@ const model: CandidateModel = {
   activities: [],
   boundaries: ['记录如何归属事项尚未确定。'],
 }
+const uncertainCheck = (_basis: string) =>
+  JSON.stringify({
+    summary: '业务归属尚未明确。',
+    cases: [
+      {
+        id: 'ownership',
+        fact: '记录归属事项',
+        basisIds: ['U1'],
+        scenario: '记录 R 属于事项 A 或 A/B，业务尚未确定。',
+        status: 'uncertain',
+        elements: [],
+        explanation: '模型保留未知边界。',
+        gap: '归属未确定。',
+        suggestion: '保留未知，不作默认。',
+      },
+    ],
+    clarifications: [],
+  })
 
 test('clarifications are review metadata with basis and impact, published before B and omitted from its input', async () => {
   let calls = 0
@@ -40,6 +59,7 @@ test('clarifications are review metadata with basis and impact, published before
     { narrative },
     async (prompt) => {
       if (++calls === 1) return plan
+      if (calls === 3) return uncertainCheck(narrative)
       assert.ok(
         events.some(
           (event) =>
@@ -53,16 +73,19 @@ test('clarifications are review metadata with basis and impact, published before
     },
     { onEvent: (event) => events.push(event) },
   )
-  assert.equal(calls, 2)
+  assert.equal(calls, 3)
   assert.deepEqual(result.clarifications, parseModelClarifications(plan))
   assert.deepEqual(result.model.boundaries, model.boundaries)
   assert.equal('questions' in result.model, false)
   assert.equal(result.semanticPlan, plan)
-  const retry = await compileModel(plan, async (prompt) => {
+  let retryCalls = 0
+  const retry = await compileModel(plan, narrative, async (prompt) => {
+    if (++retryCalls === 2) return uncertainCheck(narrative)
     assert.ok(prompt.endsWith(JSON.stringify(semantics)))
     return JSON.stringify(model)
   })
-  assert.deepEqual(retry.clarifications, result.clarifications)
+  assert.deepEqual(retry.clarifications, parseModelClarifications(plan))
+  assert.equal(retry.expressionReview.status, 'issues')
 })
 
 test('unsupported business questions cannot silently reach the user or compiler', async () => {
@@ -71,14 +94,20 @@ test('unsupported business questions cannot silently reach the user or compiler'
     /缺少依据/,
   )
   let calls = 0
-  await assert.rejects(
-    buildModel({ narrative: '独立保存事项。' }, async () => {
+  const result = await buildModel(
+    { narrative: '独立保存事项。' },
+    async (prompt) => {
       calls++
-      return plan
-    }),
-    /依据不在当前业务说明/,
+      if (calls === 1) return plan
+      if (calls === 3) return uncertainCheck('独立保存事项。')
+      assert.doesNotMatch(prompt, /一份处理记录可以归属几个事项/)
+      return JSON.stringify(model)
+    },
   )
-  assert.equal(calls, 1)
+  assert.equal(calls, 3)
+  assert.deepEqual(result.clarifications, [])
+  assert.equal(result.semanticPlan, plan)
+  assert.match(result.validation.warnings.join('\n'), /依据不在当前业务说明/)
   assert.throws(
     () =>
       parseModelClarifications(
@@ -117,6 +146,55 @@ test('unsupported business questions cannot silently reach the user or compiler'
       '“一份记录只属于一个事项”与“所有事项自动共享记录”冲突。',
     ),
     false,
+  )
+})
+
+test('one invalid question cannot erase valid questions or the plan when B fails', async () => {
+  const mixed =
+    plan +
+    '\n2. 其他记录是否共享？\n依据：不存在的依据\n歧义：共享或独立\n影响：归属不同\n3. 需要审批吗？'
+  const events: StageEvent[] = []
+  let calls = 0
+  await assert.rejects(
+    buildModel(
+      { narrative },
+      async (prompt) => {
+        if (++calls === 1) return mixed
+        assert.doesNotMatch(prompt, /其他记录是否共享|不存在的依据|需要审批吗/)
+        return '{}'
+      },
+      { onEvent: (event) => events.push(event) },
+    ),
+    /模型整理失败/,
+  )
+  assert.equal(calls, 2)
+  const event = events.find((e) => e.type === 'model-plan')
+  assert.ok(event?.type === 'model-plan')
+  assert.equal(event.semanticPlan, mixed)
+  assert.equal(event.clarifications.length, 1)
+  assert.equal(event.warnings.length, 2)
+  assert.equal(reviewModelClarifications(mixed).clarifications.length, 0)
+})
+
+test('duplicate questions are isolated and a questionnaire alone is not a model plan', async () => {
+  const duplicate = plan + '\n' + section.split('\n').slice(1).join('\n')
+  const review = reviewModelClarifications(duplicate, narrative)
+  assert.equal(review.clarifications.length, 1)
+  assert.match(review.warnings[0], /重复/)
+  let calls = 0
+  await assert.rejects(
+    buildModel({ narrative }, async () => {
+      calls++
+      return section
+    }),
+    /没有可整理的模型内容/,
+  )
+  assert.equal(calls, 1)
+  await assert.rejects(
+    compileModel(section, narrative, async () => {
+      throw new Error('must not invoke')
+    }),
+    /没有可整理的模型内容/,
   )
 })
 

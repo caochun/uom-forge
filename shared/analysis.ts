@@ -1,4 +1,5 @@
 import type { CandidateModel, Evidence } from './model.ts'
+import type { ExpressionReview } from './expression.ts'
 
 export interface BusinessDocument {
   name: string
@@ -70,10 +71,12 @@ export interface ModelingResult {
   semanticPlan: string
   clarifications: BusinessClarification[]
   model: CandidateModel
+  expressionReview: ExpressionReview
   provenance: { basis: 'business-understanding'; evidence: 'unlinked' }
   validation: { elements: number; warnings: string[] }
 }
 export type ProviderId = 'deepseek' | 'gpt'
+export const DEFAULT_PROVIDER: ProviderId = 'gpt'
 export const PROVIDERS: Record<ProviderId, { name: string; label: string }> = {
   deepseek: { name: 'DeepSeek', label: 'DeepSeek API' },
   gpt: { name: 'GPT', label: 'GPT API' },
@@ -97,20 +100,27 @@ export type ProviderEvent =
   | { type: 'phase'; text: string }
   | { type: 'delta'; text: string; reasoning?: boolean; size?: number }
   | { type: 'timing'; timing: TurnTiming }
-export type StagePart = 'reading' | 'semantic' | 'compile'
+export type StagePart =
+  'reading' | 'semantic' | 'compile' | 'expression' | 'repair' | 'recheck'
 export type StageEvent =
   | (ProviderEvent & { part?: StagePart })
+  | {
+      type: 'model-checkpoint'
+      model: CandidateModel
+      expressionReview: ExpressionReview
+    }
   | {
       type: 'model-plan'
       part: 'semantic'
       semanticPlan: string
       clarifications: BusinessClarification[]
+      warnings: string[]
     }
   | ({ type: 'understanding-narrative' } & Understanding)
 export type AnalysisRequest = { provider: ProviderId } & (
   | { stage: 'understand'; document: BusinessDocument }
   | { stage: 'model'; narrative: string; model?: unknown; instruction?: string }
-  | { stage: 'compile'; semanticPlan: string }
+  | { stage: 'compile'; semanticPlan: string; narrative: string }
   | { stage: 'narrate'; model: CandidateModel }
   | { stage: 'assess'; model: CandidateModel }
 )

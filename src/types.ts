@@ -9,6 +9,7 @@ import type {
 } from '../shared/analysis.ts'
 import type { CandidateModel, Element } from '../shared/model.ts'
 import type { Revisions } from './workspace.ts'
+import type { ExpressionReview } from '../shared/expression.ts'
 
 export type AnalysisStage = AnalysisRequest['stage']
 export type WorkspacePage = 'document' | 'understanding' | 'model' | 'review'
@@ -42,12 +43,14 @@ export interface SemanticPlan {
   plan: string
   complete: boolean
   compiled: boolean
+  warnings?: string[]
 }
 export interface CandidateDraft {
   model: CandidateModel
   revision: number
   documentRevision: number
   edited?: boolean
+  expressionReview?: ExpressionReview
   historicalQuestions?: string[]
 }
 export interface WorkspaceMessage extends ChatMessage {

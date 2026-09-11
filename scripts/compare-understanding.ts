@@ -18,7 +18,7 @@ const { values } = parseArgs({
   options: {
     input: { type: 'string' },
     output: { type: 'string' },
-    provider: { type: 'string', default: 'deepseek' },
+    provider: { type: 'string' },
   },
 })
 if (!values.input || !values.output)

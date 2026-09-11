@@ -129,6 +129,27 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
         options.onEvent?.({ type: 'delta', text: semanticPlan })
         return semanticPlan
       }
+      if (prompts.length === 3) {
+        assert.match(prompt, /NARRATIVE_ONLY/)
+        assert.doesNotMatch(prompt, /FEEDBACK_ONLY|跟踪事项与成果/)
+        return JSON.stringify({
+          summary: '可表达。',
+          cases: [
+            {
+              id: 'c1',
+              fact: '事项形成成果',
+              basisIds: ['U1'],
+              scenario: '事项 A 形成成果 B',
+              status: 'expressed',
+              elements: ['produces'],
+              explanation: '形成关系明确归属。',
+              gap: '',
+              suggestion: '',
+            },
+          ],
+          clarifications: [],
+        })
+      }
       assert.ok(
         events.some(
           (event) =>
@@ -142,7 +163,8 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
     },
     { provider: 'gpt', onEvent: (event) => events.push(event) },
   )
-  assert.equal(prompts.length, 2)
+  assert.equal(prompts.length, 3)
+  assert.equal(result.expressionReview.status, 'passed')
   assert.equal(result.semanticPlan, semanticPlan)
   assert.deepEqual(result.model, candidate())
   assert.deepEqual(result.provenance, {
@@ -171,20 +193,45 @@ test('missing narrative stops before invoking a provider', async () => {
 
 test('standalone compilation retries only B using the exact saved semantic plan', async () => {
   let calls = 0
-  const result = await compileModel(semanticPlan, async (prompt) => {
-    calls++
-    assert.equal(prompt, compileModelPrompt(semanticPlan))
-    assert.doesNotMatch(
-      prompt,
-      /additionalProperties|NARRATIVE_ONLY|FEEDBACK_ONLY/,
-    )
-    return JSON.stringify(candidate())
-  })
-  assert.equal(calls, 1)
+  const result = await compileModel(
+    semanticPlan,
+    'NARRATIVE_ONLY',
+    async (prompt) => {
+      calls++
+      if (calls === 2) {
+        assert.match(prompt, /NARRATIVE_ONLY/)
+        return JSON.stringify({
+          summary: '可表达',
+          cases: [
+            {
+              id: 'c1',
+              fact: '成果归属事项',
+              basisIds: ['U1'],
+              scenario: '甲事项形成乙成果',
+              status: 'expressed',
+              elements: ['produces'],
+              explanation: '关系区分归属。',
+              gap: '',
+              suggestion: '',
+            },
+          ],
+          clarifications: [],
+        })
+      }
+      assert.equal(prompt, compileModelPrompt(semanticPlan))
+      assert.doesNotMatch(
+        prompt,
+        /additionalProperties|NARRATIVE_ONLY|FEEDBACK_ONLY/,
+      )
+      return JSON.stringify(candidate())
+    },
+  )
+  assert.equal(calls, 2)
+  assert.equal(result.expressionReview.status, 'passed')
   assert.equal(result.semanticPlan, semanticPlan)
   for (const plan of ['', undefined, ' '])
     await assert.rejects(
-      compileModel(plan as string, async () => {
+      compileModel(plan as string, 'NARRATIVE_ONLY', async () => {
         throw new Error('must not run')
       }),
       /请先完成建模说明/,

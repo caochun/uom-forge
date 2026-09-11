@@ -130,3 +130,46 @@ export function parseModelClarifications(
   }
   return result
 }
+
+export interface ClarificationReview {
+  clarifications: BusinessClarification[]
+  warnings: string[]
+}
+
+// Quarantine optional questions individually. Never change the saved plan or
+// let a malformed/questionable excerpt become a confirmed business premise.
+export function reviewModelClarifications(
+  plan: string,
+  narrative?: string,
+): ClarificationReview {
+  const result: ClarificationReview = { clarifications: [], warnings: [] }
+  const range = sectionRange(plan)
+  if (!range || /^(?:无[。.]?|无需补充[。.]?)?$/.test(range.body.trim()))
+    return result
+  if (narrative === undefined) {
+    result.warnings.push(
+      '本次仅整理已有建模说明，未重新校验其中的澄清依据；不新增待确认问题，已有问题仍保留在业务理解中。',
+    )
+    return result
+  }
+  const seen = new Set<string>()
+  const items = range.body.trim().split(/(?=^[ \t]*\d+[.)、][ \t]+)/m)
+  for (const body of items.filter((item) => item.trim())) {
+    try {
+      const parsed = parseModelClarifications(`## ${CLARIFICATION_SECTION}\n${body}`)
+      if (parsed.length !== 1) throw new Error('业务澄清需使用编号列表。')
+      const item = parsed[0]
+      if (!containsBasis(narrative, item.basis))
+        throw new Error(`业务澄清“${item.text}”的依据不在当前业务说明中。`)
+      const key = questionKey(item.text)
+      if (seen.has(key)) throw new Error(`业务澄清“${item.text}”重复。`)
+      seen.add(key)
+      result.clarifications.push(item)
+    } catch (error) {
+      result.warnings.push(
+        `${error instanceof Error ? error.message : String(error)}该项未加入待确认问题，原输出已保留；模型中已说明的不确定边界仍需审阅。`,
+      )
+    }
+  }
+  return result
+}

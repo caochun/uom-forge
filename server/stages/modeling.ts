@@ -4,9 +4,11 @@ import { semanticModelPrompt, compileModelPrompt } from './prompts.ts'
 import type { ModelingInput, ModelingResult } from '../../shared/analysis.ts'
 import type { RunTurn } from '../providers/types.ts'
 import { scopedTurn, type StageOptions } from './contracts.ts'
+import { checkAndRepair } from './expression.ts'
 import {
-  containsBasis,
-  parseModelClarifications,
+  modelingContent,
+  reviewModelClarifications,
+  type ClarificationReview,
 } from '../../shared/clarifications.ts'
 
 export async function buildModel(
@@ -28,30 +30,49 @@ export async function buildModel(
   )
   options.signal?.throwIfAborted()
   if (!semanticPlan.trim()) throw new Error('未返回建模说明。')
-  const clarifications = parseModelClarifications(semanticPlan)
-  for (const item of clarifications)
-    if (!containsBasis(input.narrative, item.basis))
-      throw new Error(
-        `业务澄清“${item.text}”的依据不在当前业务说明中。建模输出已保留，请检查后重新建模。`,
-      )
+  const review = reviewModelClarifications(semanticPlan, input.narrative)
   // Publish before compilation so errors or cancellation cannot erase it.
-  report({ type: 'model-plan', part: 'semantic', semanticPlan, clarifications })
+  report({ type: 'model-plan', part: 'semantic', semanticPlan, ...review })
   options.signal?.throwIfAborted()
-  return compileModel(semanticPlan, runTurn, options)
+  const compiled = await compileReviewedPlan(
+    semanticPlan,
+    review,
+    runTurn,
+    options,
+  )
+  return checkAndRepair(compiled, input.narrative, runTurn, options)
 }
 
-// Retry B without rerunning semantic decisions or adding earlier inputs.
+// Retry B with plan-only inference; the subsequent check needs current understanding.
 export async function compileModel(
   semanticPlan: string,
+  narrative: string,
   runTurn: RunTurn,
   options: StageOptions = {},
 ): Promise<ModelingResult> {
   if (typeof semanticPlan !== 'string' || !semanticPlan.trim())
     throw new Error('请先完成建模说明。')
+  requireText(narrative, '业务说明')
+  const compiled = await compileReviewedPlan(
+    semanticPlan,
+    reviewModelClarifications(semanticPlan, narrative),
+    runTurn,
+    options,
+  )
+  return checkAndRepair(compiled, narrative, runTurn, options)
+}
+
+async function compileReviewedPlan(
+  semanticPlan: string,
+  review: ClarificationReview,
+  runTurn: RunTurn,
+  options: StageOptions,
+): Promise<Omit<ModelingResult, 'expressionReview'>> {
   if (semanticPlan.length > 120000)
     throw new Error('建模说明超过 12 万个字符，请先缩小建模范围。')
+  if (!modelingContent(semanticPlan).trim())
+    throw new Error('建模说明只有澄清问题，没有可整理的模型内容。')
   options.signal?.throwIfAborted()
-  const clarifications = parseModelClarifications(semanticPlan)
   const report = options.onEvent || (() => {})
   report({ type: 'phase', part: 'compile', text: '正在整理候选模型。' })
   try {
@@ -70,12 +91,12 @@ export async function compileModel(
       model.activities.length
     return {
       semanticPlan,
-      clarifications,
+      clarifications: review.clarifications,
       model,
       provenance: { basis: 'business-understanding', evidence: 'unlinked' },
       validation: {
         elements,
-        warnings: ['基于业务说明建模，尚未关联原文证据。'],
+        warnings: [...review.warnings, '基于业务说明建模，尚未关联原文证据。'],
       },
     }
   } catch (error) {

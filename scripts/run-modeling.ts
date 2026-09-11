@@ -15,7 +15,8 @@ const { values } = parseArgs({
   options: {
     input: { type: 'string' },
     'semantic-plan': { type: 'string' },
-    provider: { type: 'string', default: 'deepseek' },
+    narrative: { type: 'string' },
+    provider: { type: 'string' },
   },
 })
 if (Boolean(values.input) === Boolean(values['semantic-plan']))
@@ -26,6 +27,11 @@ const provider = resolveProvider(values.provider)
 const savedPlan = values['semantic-plan']
   ? await readFile(values['semantic-plan'], 'utf8')
   : null
+const retryNarrative = values.narrative
+  ? await readFile(values.narrative, 'utf8')
+  : ''
+if (savedPlan !== null)
+  requireText(retryNarrative, '重试检查所需的业务说明（--narrative）')
 let input: ModelingInput | null = null
 if (values.input) {
   const value: unknown = JSON.parse(await readFile(values.input, 'utf8'))
@@ -42,16 +48,21 @@ if (values.input) {
 const output = await mkdtemp(path.join(tmpdir(), 'forge-modeling-'))
 await writeFile(
   path.join(output, 'input.json'),
-  JSON.stringify(input || { semanticPlan: savedPlan }, null, 2),
+  JSON.stringify(
+    input || { semanticPlan: savedPlan, narrative: retryNarrative },
+    null,
+    2,
+  ),
 )
 const events: unknown[] = []
 const timings: unknown[] = []
 const started = Date.now()
 let turn = 0
+let part = 'semantic'
 console.log(`Artifacts: ${output}`)
 try {
   const invoke: RunTurn = async (prompt, options) => {
-    const name = savedPlan === null && ++turn === 1 ? 'semantic' : 'compile'
+    const name = `${++turn}-${part}`
     await writeFile(path.join(output, `${name}-prompt.txt`), prompt)
     const turnStarted = Date.now()
     let streamed = ''
@@ -84,13 +95,14 @@ try {
     provider,
     onEvent: (event) => {
       events.push({ ms: Date.now() - started, ...event })
+      if (event.type === 'phase' && event.part) part = event.part
       if (event.type === 'phase') console.log(`[${event.part}] ${event.text}`)
     },
   }
   const result =
     savedPlan === null
       ? await buildModel(input!, invoke, options)
-      : await compileModel(savedPlan, invoke, options)
+      : await compileModel(savedPlan, retryNarrative, invoke, options)
   await writeFile(
     path.join(output, 'result.json'),
     JSON.stringify(result, null, 2),

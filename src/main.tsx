@@ -35,7 +35,8 @@ import type {
   DiscussionRequest,
   ProviderId,
 } from '../shared/analysis.ts'
-import { PROVIDERS } from '../shared/analysis.ts'
+import { DEFAULT_PROVIDER, PROVIDERS } from '../shared/analysis.ts'
+import { interruptReview, STAGE_PART_LABELS } from '../shared/expression.ts'
 import type {
   AnalysisStage,
   DiscussionSubject,
@@ -134,7 +135,7 @@ function App() {
   const [elapsed, setElapsed] = useState(0)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
-  const [provider, setProvider] = useState<ProviderId>('deepseek')
+  const [provider, setProvider] = useState<ProviderId>(DEFAULT_PROVIDER)
   const busyRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
   const cancelled = useRef(false)
@@ -233,6 +234,14 @@ function App() {
     } finally {
       setProject((current) => ({
         ...current,
+        candidate: current.candidate?.expressionReview
+          ? {
+              ...current.candidate,
+              expressionReview: interruptReview(
+                current.candidate.expressionReview,
+              ),
+            }
+          : current.candidate,
         timings: Object.fromEntries(
           Object.entries(current.timings || {}).map(([stage, records]) => [
             stage,
@@ -274,6 +283,7 @@ function App() {
     const id = createId()
     const started = Date.now()
     const basis = projectRef.current.revisions.business
+    const modelRevision = projectRef.current.revisions.model + 1
     setJob({
       stage,
       started,
@@ -325,7 +335,7 @@ function App() {
     if (!response.ok) throw new Error('分析服务返回 HTTP ' + response.status)
     const received: { result?: AnalysisResult } = {}
     let output = ''
-    let part = ''
+    let part: import('../shared/analysis.ts').StagePart | '' = ''
     await readSse(response, (event) => {
       if (controller.signal.aborted)
         throw new DOMException('已停止', 'AbortError')
@@ -366,10 +376,7 @@ function App() {
           (stage === 'model' || stage === 'compile')
         ) {
           part = event.part
-          output +=
-            '\n\n—— ' +
-            (part === 'semantic' ? '建模说明' : '模型整理') +
-            ' ——\n\n'
+          output += '\n\n—— ' + STAGE_PART_LABELS[part] + ' ——\n\n'
         }
         output += event.text || ''
         setProject((current) => ({
@@ -402,6 +409,7 @@ function App() {
                 plan: event.semanticPlan,
                 complete: true,
                 compiled: false,
+                warnings: event.warnings,
               },
               revisions: { ...current.revisions, planBasis: basis },
             },
@@ -409,6 +417,26 @@ function App() {
             'model',
           ),
         )
+      if (event.type === 'model-checkpoint') {
+        setModelMode('model')
+        setProject((current) => ({
+          ...current,
+          candidate: {
+            model: event.model,
+            revision: modelRevision,
+            documentRevision: current.revisions.document,
+            expressionReview: event.expressionReview,
+          },
+          plan: current.plan
+            ? { ...current.plan, compiled: true }
+            : current.plan,
+          revisions: {
+            ...current.revisions,
+            candidateBasis: basis,
+            model: modelRevision,
+          },
+        }))
+      }
       if (event.type === 'error') throw new Error(event.error || '分析失败')
       if (event.type === 'result') received.result = event.result
     })
@@ -458,7 +486,10 @@ function App() {
       const basis = project.revisions.business
       const result =
         retry && project.plan
-          ? await runStage('compile', { semanticPlan: project.plan.plan })
+          ? await runStage('compile', {
+              semanticPlan: project.plan.plan,
+              narrative: project.understanding?.narrative || '',
+            })
           : await runStage('model', {
               narrative: project.understanding?.narrative || '',
               instruction:
@@ -477,16 +508,27 @@ function App() {
           ...current.revisions,
           planBasis: basis,
           candidateBasis: basis,
-          model: current.revisions.model + 1,
+          model: current.revisions.model,
         }
         return receiveClarifications(
           {
             ...current,
-            plan: { plan: result.semanticPlan, complete: true, compiled: true },
+            plan: {
+              plan: result.semanticPlan,
+              complete: true,
+              compiled: true,
+              warnings: [
+                ...new Set([
+                  ...(retry ? current.plan?.warnings || [] : []),
+                  ...result.validation.warnings,
+                ]),
+              ],
+            },
             candidate: {
               model: result.model,
               revision: revisions.model,
               documentRevision: current.revisions.document,
+              expressionReview: result.expressionReview,
             },
             revisions,
           },
@@ -499,7 +541,10 @@ function App() {
       addMessage({
         role: 'assistant',
         content:
-          '候选模型已生成。可以检查对象关系与业务能力，或点击“检验模型”查看自述和业务过程支撑。',
+          (result.expressionReview.status === 'passed'
+            ? '候选模型已生成，本轮业务表达检查用例均可表达。'
+            : '候选模型已保留，请查看业务表达检查中的剩余事项。') +
+          '可点击“检验模型”查看自述和业务过程支撑。',
       })
     })
   const checkModel = (only?: 'assess' | 'narrate') =>
@@ -890,7 +935,7 @@ function App() {
                   {STAGES[job.stage]}
                   {modelRunning
                     ? ' · ' +
-                      (runPart === 'compile' ? '2/2 整理模型' : '1/2 建模说明')
+                      (runPart ? STAGE_PART_LABELS[runPart] : '形成建模说明')
                     : ''}
                 </strong>
                 <small>
@@ -919,12 +964,9 @@ function App() {
             records={visibleStages.flatMap((stage) =>
               (project.timings?.[stage] || []).map((record) => ({
                 ...record,
-                label:
-                  record.part === 'semantic'
-                    ? '建模判断'
-                    : record.part === 'compile'
-                      ? '整理模型'
-                      : STAGES[stage],
+                label: record.part
+                  ? STAGE_PART_LABELS[record.part]
+                  : STAGES[stage],
               })),
             )}
           />
@@ -1109,8 +1151,8 @@ function App() {
                     project.revisions.model ||
                   Boolean(
                     project.feedback &&
-                      project.feedbackDocumentRevision !==
-                        project.revisions.document,
+                    project.feedbackDocumentRevision !==
+                      project.revisions.document,
                   )
                 }
                 onDiscuss={discussElement}

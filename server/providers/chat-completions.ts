@@ -53,6 +53,9 @@ export function createChatCompletionsProvider(
         },
         body: JSON.stringify({
           ...config.parameters,
+          ...(options.outputFormat === 'json'
+            ? { response_format: { type: 'json_object' } }
+            : {}),
           model,
           stream: true,
           messages: [{ role: 'user', content: prompt }],

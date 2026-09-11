@@ -30,6 +30,14 @@ export function parseAnalysisEvent(value: unknown): AnalysisEvent {
       )
         return value as AnalysisEvent
       break
+    case 'model-checkpoint':
+      if (
+        isRecord(value.model) &&
+        isRecord(value.expressionReview) &&
+        Array.isArray(value.expressionReview.snapshots)
+      )
+        return value as AnalysisEvent
+      break
     case 'understanding-narrative':
       if (typeof value.narrative === 'string') return value as AnalysisEvent
       break
@@ -44,8 +52,8 @@ export function isStageResult<S extends AnalysisStage>(
 ): result is AnalysisResults[S] {
   const fields = {
     understand: ['understanding'],
-    model: ['semanticPlan', 'model', 'clarifications'],
-    compile: ['semanticPlan', 'model', 'clarifications'],
+    model: ['semanticPlan', 'model', 'clarifications', 'expressionReview'],
+    compile: ['semanticPlan', 'model', 'clarifications', 'expressionReview'],
     narrate: ['narrative'],
     assess: ['assessment'],
   } as const

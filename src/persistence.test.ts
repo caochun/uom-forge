@@ -23,6 +23,58 @@ const empty: Project = {
   revisions: initialRevisions,
   messages: [],
 }
+test('expression review survives save/restore, interrupted work is incomplete, and updated understanding makes it stale', () => {
+  const model = {
+    schemaVersion: '1',
+    name: '事项',
+    summary: '说明',
+    objects: [],
+    relations: [],
+    actions: [],
+    functions: [],
+    rules: [],
+    activities: [],
+    boundaries: [],
+  }
+  const stored = {
+    ...empty,
+    revisions: {
+      ...initialRevisions,
+      understoodDocument: 0,
+      business: 1,
+      candidateBasis: 1,
+      model: 2,
+    },
+    candidate: {
+      model,
+      revision: 2,
+      documentRevision: 0,
+      expressionReview: {
+        status: 'checking',
+        snapshots: [{ model }],
+        changes: [],
+        warnings: [],
+      },
+    },
+  }
+  const restored = restoreProject(JSON.parse(JSON.stringify(stored)), empty)
+  assert.equal(restored.candidate?.expressionReview?.status, 'incomplete')
+  assert.equal(restored.candidate?.expressionReview?.snapshots.length, 1)
+  assert.deepEqual(
+    restored.candidate?.expressionReview?.snapshots[0].model,
+    model,
+  )
+  assert.equal(freshness(restored.revisions).candidate, false)
+  assert.equal(
+    freshness({ ...restored.revisions, business: 2 }).candidate,
+    true,
+  )
+  const again = restoreProject(JSON.parse(JSON.stringify(restored)), empty)
+  assert.deepEqual(
+    again.candidate?.expressionReview,
+    restored.candidate?.expressionReview,
+  )
+})
 test('restoring an existing draft preserves the document, edits, answers, feedback and timing history', () => {
   const stored = {
     ...empty,
@@ -41,6 +93,12 @@ test('restoring an existing draft preserves the document, edits, answers, feedba
     answers: { 0: ['甲', '乙'], 1: '补充信息' },
     feedback: '保留对象边界',
     feedbackDocumentRevision: 2,
+    plan: {
+      plan: '建模说明原文',
+      complete: true,
+      compiled: false,
+      warnings: ['有一项澄清未通过引文校验，未加入问题目录。'],
+    },
     revisions: {
       ...initialRevisions,
       document: 2,
@@ -117,6 +175,7 @@ test('restoring an existing draft preserves the document, edits, answers, feedba
     empty,
   )
   assert.deepEqual(restored.document, stored.document)
+  assert.deepEqual(restored.plan, stored.plan)
   const { questions: priorQuestions, ...model } = stored.candidate.model
   assert.deepEqual(restored.candidate, {
     ...stored.candidate,

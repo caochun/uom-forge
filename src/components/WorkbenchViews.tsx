@@ -205,6 +205,9 @@ export function DocumentView({
   )
 }
 
+import ExpressionReview from './ExpressionReview.tsx'
+import { STAGE_PART_LABELS } from '../../shared/expression.ts'
+
 const COLLECTIONS = [
   ['objects', '对象关系'],
   ['actions', '业务操作'],
@@ -264,6 +267,7 @@ export function CandidateView({
   }, [selectedId, selectedKind])
   const select = (id: string) => {
     if (!model) return
+    onMode('model')
     const kind = EDITABLE_COLLECTIONS.find((key) =>
       model[key].some((item) => item.id === id),
     )
@@ -283,15 +287,23 @@ export function CandidateView({
           onChange={onMode}
         />
         <span className="muted">
-          {runningPart === 'semantic'
-            ? '正在形成建模说明'
-            : runningPart === 'compile'
-              ? '正在整理候选模型'
-              : candidate
-                ? `模型版本 ${candidate.revision}${candidate.edited ? ' · 已手工修改' : ''}`
-                : '尚未生成模型'}
+          {runningPart
+            ? STAGE_PART_LABELS[runningPart]
+            : candidate
+              ? `模型版本 ${candidate.revision}${candidate.edited ? ' · 已手工修改' : ''}`
+              : '尚未生成模型'}
         </span>
       </div>
+      {candidate && (
+        <ExpressionReview candidate={candidate} onSelect={select} />
+      )}
+      {!!plan?.warnings?.length && (
+        <Notice>
+          {plan.warnings.map((warning, index) => (
+            <p key={index}>{warning}</p>
+          ))}
+        </Notice>
+      )}
       {mode === 'plan' ? (
         <article className="panel-surface reading-narrative">
           <div className="panel-toolbar">
@@ -320,14 +332,16 @@ export function CandidateView({
                 <i />
                 <i />
               </span>
-              {runningPart === 'compile'
-                ? '说明已完成，正在整理模型。'
-                : '正在形成说明。'}
+              {STAGE_PART_LABELS[runningPart]}…
             </div>
           )}
-          {candidate?.edited && plan?.compiled && (
-            <Notice>模型已手工修改，以上说明保留生成时的建模判断。</Notice>
-          )}
+          {(candidate?.edited ||
+            !!candidate?.expressionReview?.changes.length) &&
+            plan?.compiled && (
+              <Notice>
+                模型已经修正，以上保留初始建模说明。最新定义以模型视图为准，修正原因见业务表达检查。
+              </Notice>
+            )}
         </article>
       ) : !model ? (
         <div className="empty-state panel-surface">

@@ -31,6 +31,7 @@ test('DeepSeek preserves split UTF-8, multiline SSE, reasoning and final untermi
       model: 'test-model',
       stream: true,
       thinking: { type: 'disabled' },
+      max_tokens: 16384,
       messages: [{ role: 'user', content: 'this turn only' }],
     })
     return new Response(stream)
@@ -83,6 +84,31 @@ test('DeepSeek user cancellation remains AbortError and closes the stream', asyn
     { name: 'AbortError' },
   )
   assert.equal(closed, true)
+})
+
+test('structured turns request JSON output and honor a configurable token ceiling', async () => {
+  const provider = createDeepSeekProvider(
+    async (_url, init) => {
+      const request = JSON.parse(String(init?.body))
+      assert.deepEqual(request.response_format, { type: 'json_object' })
+      assert.equal(request.max_tokens, 12000)
+      assert.deepEqual(request.thinking, { type: 'disabled' })
+      return new Response(
+        'data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+      )
+    },
+    { ...env, LLM_MAX_OUTPUT_TOKENS: '12000' },
+  )
+  assert.equal(await provider('return JSON', { outputFormat: 'json' }), '{}')
+  await assert.rejects(
+    createDeepSeekProvider(
+      async () => {
+        throw new Error('must not fetch')
+      },
+      { ...env, LLM_MAX_OUTPUT_TOKENS: 'invalid' },
+    )('JSON', {}),
+    /正整数/,
+  )
 })
 
 test('DeepSeek timeouts stop a stalled stream; errors and partial output are not successes', async () => {

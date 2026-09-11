@@ -1886,3 +1886,18 @@ textarea:focus,
     animation: none;
   }
 }
+.expression-review { padding: 16px 20px; margin-bottom: 16px; }
+.expression-review > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.expression-review > summary::before { content: '▸'; }
+.expression-review[open] > summary::before { content: '▾'; }
+.expression-review > summary span, .expression-review > summary small { color: var(--muted, #667085); }
+.expression-review-body { display: grid; gap: 14px; padding-top: 16px; }
+.expression-review-body p { margin: 0; line-height: 1.7; overflow-wrap: anywhere; }
+.expression-review-body details > summary { cursor: pointer; }
+.expression-case { border: 1px solid #e1e5ed; border-left: 3px solid #b9c5d9; border-radius: 8px; padding: 14px; display: grid; gap: 8px; }
+.expression-case.defect { border-left-color: #d28249; }
+.expression-case.uncertain { border-left-color: #9a86ba; }
+.expression-case-title { display: flex; align-items: baseline; gap: 10px; }
+.expression-case-title span { flex-shrink: 0; font-size: 12px; color: #667085; }
+.expression-elements { display: flex; flex-wrap: wrap; gap: 12px; }
+.expression-case blockquote { white-space: pre-wrap; color: #667085; border-left: 2px solid #e1e5ed; margin: 12px 0 0; padding-left: 12px; }

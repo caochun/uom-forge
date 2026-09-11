@@ -37,7 +37,13 @@ export function parseAnalysisRequest(
     }
     case 'compile':
       requireText(input.semanticPlan, '建模说明')
-      return { provider, stage: 'compile', semanticPlan: input.semanticPlan }
+      requireText(input.narrative, '业务说明')
+      return {
+        provider,
+        stage: 'compile',
+        semanticPlan: input.semanticPlan,
+        narrative: input.narrative,
+      }
     case 'narrate':
       return {
         provider,

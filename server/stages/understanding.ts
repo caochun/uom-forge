@@ -5,6 +5,7 @@ import type { RunTurn } from '../providers/types.ts'
 import { scopedTurn, type StageOptions } from './contracts.ts'
 
 import { extractQuestions } from '../../shared/questions.ts'
+import { runPiUnderstanding } from '../agents/pi-understanding.ts'
 
 export function understandingWarnings(narrative: string): string[] {
   const headings = new Set(
@@ -30,10 +31,15 @@ export async function readBusiness(
     part: 'reading',
     text: '正在阅读文档，形成业务语义说明。',
   })
-  const narrative = await runTurn(
-    understandingPrompt(document),
-    scopedTurn(options, 'reading'),
-  )
+  const usePi =
+    options.runtime === 'pi' ||
+    (options.runtime === undefined && process.env.UOM_AGENT_RUNTIME === 'pi')
+  const narrative = usePi
+    ? await runPiUnderstanding(document, options.provider || 'gpt', runTurn, options)
+    : await runTurn(
+        understandingPrompt(document),
+        scopedTurn(options, 'reading'),
+      )
   options.signal?.throwIfAborted()
   if (!narrative.trim()) throw new Error('未返回业务说明，请重试。')
   const understanding = {

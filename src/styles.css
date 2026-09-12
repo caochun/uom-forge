@@ -104,6 +104,16 @@ h4 {
   gap: 9px;
   flex-wrap: wrap;
 }
+.runtime-choice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.choice-label {
+  color: #aebbd0;
+  font-size: 11px;
+  white-space: nowrap;
+}
 .provider-switch {
   display: flex;
   gap: 3px;

@@ -10,6 +10,8 @@ import {
   reviewModelClarifications,
   type ClarificationReview,
 } from '../../shared/clarifications.ts'
+import { runPiModeling } from '../agents/pi-modeling.ts'
+import { checkOrRepairCompiledJson } from '../agents/pi-compile.ts'
 
 export async function buildModel(
   input: ModelingInput,
@@ -24,10 +26,10 @@ export async function buildModel(
     part: 'semantic',
     text: '第二阶段 A：形成建模说明。',
   })
-  const semanticPlan = await runTurn(
-    semanticModelPrompt(input),
-    scopedTurn(options, 'semantic'),
-  )
+  const usePi = options.runtime === 'pi' || (options.runtime === undefined && process.env.UOM_AGENT_RUNTIME === 'pi')
+  const semanticPlan = usePi
+    ? await runPiModeling(input, runTurn, options)
+    : await runTurn(semanticModelPrompt(input), scopedTurn(options, 'semantic'))
   options.signal?.throwIfAborted()
   if (!semanticPlan.trim()) throw new Error('未返回建模说明。')
   const review = reviewModelClarifications(semanticPlan, input.narrative)
@@ -76,11 +78,21 @@ async function compileReviewedPlan(
   const report = options.onEvent || (() => {})
   report({ type: 'phase', part: 'compile', text: '正在整理候选模型。' })
   try {
-    const raw = await runTurn(
+    let raw = await runTurn(
       compileModelPrompt(semanticPlan),
       scopedTurn(options, 'compile'),
     )
     options.signal?.throwIfAborted()
+    const usePi = options.runtime === 'pi' || (options.runtime === undefined && process.env.UOM_AGENT_RUNTIME === 'pi')
+    if (usePi) {
+      raw = await checkOrRepairCompiledJson(
+        semanticPlan,
+        raw,
+        options.provider || 'gpt',
+        options,
+      )
+      options.signal?.throwIfAborted()
+    }
     const model = validateCompiledModel(raw)
     const elements =
       model.objects.length +

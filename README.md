@@ -116,8 +116,9 @@ interface and return the same validated provider-neutral model containing object
 relations, actions, functions, rules, activities, boundaries and block-level evidence.
 `/api/discuss` uses the selected provider through the same interface.
 
-The UI starts with GPT on every page load; users can switch to DeepSeek for the current session.
-Previously saved provider preferences do not override this default;
+The UI starts with DeepSeek and the Pi Agent runtime on every page load; users can switch
+provider or runtime for the current session. Previously saved provider preferences do not
+override this default;
 the server and command-line scripts also default to GPT when no provider is specified.
 Set `UOM_LLM_PROVIDER=deepseek` or `gpt` to override that server/script default;
 an explicit request or `--provider` choice takes precedence.

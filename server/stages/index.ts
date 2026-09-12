@@ -11,7 +11,11 @@ export async function runStage(
   runTurn: RunTurn,
   options: StageOptions = {},
 ): Promise<AnalysisResult> {
-  const configured = { ...options, provider: request.provider }
+  const configured = {
+    ...options,
+    provider: request.provider,
+    runtime: request.runtime,
+  }
   switch (request.stage) {
     case 'understand':
       return readBusiness(request.document, runTurn, configured)

@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@agentclientprotocol/codex-acp": "^1.10.0",
+    "@earendil-works/pi-agent-core": "^0.85.1",
+    "@earendil-works/pi-ai": "^0.85.1",
     "@vitejs/plugin-react": "latest",
     "ajv": "^8.20.0",
     "dompurify": "^3.4.15",

@@ -33,9 +33,13 @@ import type {
   AnalysisResult,
   AnalysisResults,
   DiscussionRequest,
+  AgentRuntimeId,
   ProviderId,
 } from '../shared/analysis.ts'
-import { DEFAULT_PROVIDER, PROVIDERS } from '../shared/analysis.ts'
+import {
+  PROVIDERS,
+  RUNTIMES,
+} from '../shared/analysis.ts'
 import { interruptReview, STAGE_PART_LABELS } from '../shared/expression.ts'
 import type {
   AnalysisStage,
@@ -135,7 +139,10 @@ function App() {
   const [elapsed, setElapsed] = useState(0)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
-  const [provider, setProvider] = useState<ProviderId>(DEFAULT_PROVIDER)
+  // The workbench defaults to the iterative local workflow. The shared
+  // constants remain the protocol/server defaults for API callers.
+  const [provider, setProvider] = useState<ProviderId>('deepseek')
+  const [runtime, setRuntime] = useState<AgentRuntimeId>('pi')
   const busyRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
   const cancelled = useRef(false)
@@ -159,6 +166,7 @@ function App() {
   }
   const model = project.candidate?.model
   const providerLabel = PROVIDERS[provider].label
+  const runtimeLabel = RUNTIMES[runtime].label
   const currentLabel = PAGES.find(([id]) => id === view)?.[1]
   const canModel =
     Boolean(project.understanding?.narrative) &&
@@ -329,7 +337,7 @@ function App() {
     const response = await fetch('/api/analyze/stream', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...body, stage, provider }),
+      body: JSON.stringify({ ...body, stage, provider, runtime }),
       signal: controller.signal,
     })
     if (!response.ok) throw new Error('分析服务返回 HTTP ' + response.status)
@@ -792,18 +800,42 @@ function App() {
           <strong>领域建模工作台</strong>
         </div>
         <div className="topbar-actions">
-          <div className="provider-switch" aria-label="推理提供方">
-            {(['deepseek', 'gpt'] as const).map((value) => (
-              <button
-                key={value}
-                disabled={busy || discussing}
-                aria-pressed={provider === value}
-                className={provider === value ? 'active' : ''}
-                onClick={() => setProvider(value)}
-              >
-                {PROVIDERS[value].name}
-              </button>
-            ))}
+          <div className="runtime-choice">
+            <span className="choice-label">运行时</span>
+            <div className="provider-switch" aria-label="Agent 运行时">
+              {(['pi', 'direct'] as AgentRuntimeId[]).map((value) => (
+                <button
+                  key={value}
+                  disabled={busy || discussing}
+                  aria-pressed={runtime === value}
+                  className={runtime === value ? 'active' : ''}
+                  title={
+                    value === 'pi'
+                      ? 'Pi Agent 用于业务理解、语义建模和模型 JSON 质量检查。'
+                      : '直接调用当前选择的模型提供方。'
+                  }
+                  onClick={() => setRuntime(value)}
+                >
+                  {RUNTIMES[value].name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="runtime-choice">
+            <span className="choice-label">模型</span>
+            <div className="provider-switch" aria-label="推理提供方">
+              {(['deepseek', 'gpt'] as const).map((value) => (
+                <button
+                  key={value}
+                  disabled={busy || discussing}
+                  aria-pressed={provider === value}
+                  className={provider === value ? 'active' : ''}
+                  onClick={() => setProvider(value)}
+                >
+                  {PROVIDERS[value].name}
+                </button>
+              ))}
+            </div>
           </div>
           <button
             className="icon-button"
@@ -939,7 +971,7 @@ function App() {
                     : ''}
                 </strong>
                 <small>
-                  {providerLabel} · {elapsed} 秒 · {job.text}
+                  {runtimeLabel} · {providerLabel} · {elapsed} 秒 · {job.text}
                 </small>
                 {job.timing && (
                   <small>

@@ -81,6 +81,12 @@ export const PROVIDERS: Record<ProviderId, { name: string; label: string }> = {
   deepseek: { name: 'DeepSeek', label: 'DeepSeek API' },
   gpt: { name: 'GPT', label: 'GPT API' },
 }
+export type AgentRuntimeId = 'direct' | 'pi'
+export const DEFAULT_RUNTIME: AgentRuntimeId = 'direct'
+export const RUNTIMES: Record<AgentRuntimeId, { name: string; label: string }> = {
+  direct: { name: '直接调用', label: '直接调用模型' },
+  pi: { name: 'Pi Agent', label: 'Pi Agent' },
+}
 export interface TurnTiming {
   callId: string
   // Retain the identity of historical ACP calls in saved drafts.
@@ -117,7 +123,7 @@ export type StageEvent =
       warnings: string[]
     }
   | ({ type: 'understanding-narrative' } & Understanding)
-export type AnalysisRequest = { provider: ProviderId } & (
+export type AnalysisRequest = { provider: ProviderId; runtime?: AgentRuntimeId } & (
   | { stage: 'understand'; document: BusinessDocument }
   | { stage: 'model'; narrative: string; model?: unknown; instruction?: string }
   | { stage: 'compile'; semanticPlan: string; narrative: string }

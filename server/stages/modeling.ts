@@ -83,17 +83,32 @@ async function compileReviewedPlan(
       scopedTurn(options, 'compile'),
     )
     options.signal?.throwIfAborted()
+    let model: ReturnType<typeof validateCompiledModel>
+    const validate = (json: string) => {
+      try {
+        validateCompiledModel(json)
+        return { valid: true as const }
+      } catch (error) {
+        return {
+          valid: false as const,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      }
+    }
+    const initialValidation = validate(raw)
     const usePi = options.runtime === 'pi' || (options.runtime === undefined && process.env.UOM_AGENT_RUNTIME === 'pi')
-    if (usePi) {
+    if (!initialValidation.valid && usePi) {
       raw = await checkOrRepairCompiledJson(
         semanticPlan,
         raw,
         options.provider || 'gpt',
+        initialValidation.error,
+        validate,
         options,
       )
       options.signal?.throwIfAborted()
     }
-    const model = validateCompiledModel(raw)
+    model = validateCompiledModel(raw)
     const elements =
       model.objects.length +
       model.relations.length +

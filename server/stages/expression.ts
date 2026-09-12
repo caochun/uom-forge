@@ -58,68 +58,92 @@ export async function checkAndRepair(
         ? 'issues'
         : 'passed'
     publish()
-    if (review.status === 'repairing') {
-      phase('repair', '按已明确的业务语义进行一轮定点修正。')
-      const repaired = applyModelRepair(
-        await runTurn(
-          repairPrompt(narrative, model, first),
+    // Keep the semantic gate closed until a candidate passes a complete
+    // check. A bounded loop lets the checker repair more than one defect
+    // (including schema/reference errors introduced by a repair) while
+    // avoiding an unbounded agent conversation.
+    const maxRounds = 3
+    let previousCheck = first
+    for (let round = 0; round < maxRounds && review.status === 'repairing'; round++) {
+      phase('repair', `按已明确的业务语义进行第 ${round + 1} 轮定点修正。`)
+      let repaired: ReturnType<typeof applyModelRepair> | undefined
+      let repairError: string | undefined
+      for (let attempt = 0; attempt < 2 && !repaired; attempt++) {
+        // Provider failures (timeouts/cancellation) belong to the outer
+        // stage and must produce an `incomplete` review. Only malformed
+        // patches are recovered locally and sent back with the validator
+        // error.
+        const rawRepair = await runTurn(
+          repairPrompt(narrative, model, previousCheck, repairError),
           scopedTurn(options, 'repair'),
-        ),
-        model,
-        first,
-      )
-      options.signal?.throwIfAborted()
+        )
+        try {
+          repaired = applyModelRepair(rawRepair, model, previousCheck)
+        } catch (error) {
+          repairError = errorMessage(error)
+          if (attempt === 1) {
+            review.status = 'incomplete'
+            review.warnings.push(`定点修正未通过程序校验：${repairError}`)
+          }
+        }
+        options.signal?.throwIfAborted()
+      }
+      if (!repaired) break
       if (
         !repaired.changes.length ||
         JSON.stringify(repaired.model) === JSON.stringify(model)
       ) {
         review.status = 'issues'
         review.warnings.push('未产生有效修正，已保留原候选与未解决缺陷。')
-      } else {
-        model = repaired.model
-        review.changes = repaired.changes
-        review.snapshots.push({ model })
-        review.selectedSnapshot = 1
-        review.status = 'checking'
-        publish()
-        phase('recheck', '复查原有业务事实及相关语义，检查是否产生回归。')
-        const second = parseExpressionCheck(
-          await runTurn(
-            expressionPrompt(narrative, model, first),
-            scopedTurn(options, 'recheck'),
-          ),
-          narrative,
-          model,
-          first,
-        )
-        options.signal?.throwIfAborted()
-        review.snapshots[1].check = second
-        review.warnings.push(...second.warnings)
-        review.status =
-          second.cases.every((item) => item.status === 'expressed') &&
-          !second.clarifications.length &&
-          !second.warnings.length
-            ? 'passed'
-            : 'issues'
-        const regressions = first.cases.filter(
-          (item) =>
-            item.status === 'expressed' &&
-            second.cases.find((next) => next.id === item.id)?.status !==
-              'expressed',
-        )
-        if (regressions.length) {
-          model = review.snapshots[0].model
-          review.selectedSnapshot = 0
-          review.status = 'issues'
-          review.warnings.push(
-            `复查不再认可原先通过的业务事实（${regressions.map((item) => item.id).join('、')}），已恢复初始候选；修正尝试和两次判断仍保留，请审阅是否发生回归或检查误判。`,
-          )
-        }
-        if (review.status === 'issues')
-          review.warnings.push(
-            '已完成一轮自动修正；剩余事项保留供审阅，不继续自动循环。',
-          )
+        break
       }
+      model = repaired.model
+      review.changes.push(...repaired.changes)
+      review.snapshots.push({ model })
+      review.selectedSnapshot = review.snapshots.length - 1
+      review.status = 'checking'
+      publish()
+      phase('recheck', '复查原有业务事实及相关语义，检查是否产生回归。')
+      const next = parseExpressionCheck(
+        await runTurn(
+          expressionPrompt(narrative, model, previousCheck),
+          scopedTurn(options, 'recheck'),
+        ),
+        narrative,
+        model,
+        previousCheck,
+      )
+      options.signal?.throwIfAborted()
+      review.snapshots[review.snapshots.length - 1].check = next
+      review.warnings.push(...next.warnings)
+      const regressions = previousCheck.cases.filter(
+        (item) =>
+          item.status === 'expressed' &&
+          next.cases.find((candidate) => candidate.id === item.id)?.status !==
+            'expressed',
+      )
+      if (regressions.length) {
+        model = review.snapshots[0].model
+        review.selectedSnapshot = 0
+        review.status = 'issues'
+          review.warnings.push(
+          `复查不再认可原先通过的业务事实（${regressions.map((item) => item.id).join('、')}），已恢复初始候选；不继续自动循环。`,
+        )
+        break
+      }
+      previousCheck = next
+      review.status =
+        next.cases.some((item) => item.status === 'defect')
+          ? 'repairing'
+          : next.clarifications.length || next.warnings.length ||
+              next.cases.some((item) => item.status === 'uncertain')
+            ? 'issues'
+            : 'passed'
+      publish()
+    }
+    if (review.status === 'repairing') {
+      review.status = 'issues'
+      review.warnings.push(`已达到 ${maxRounds} 轮自动修正上限，剩余缺陷保留供审阅。`)
     }
   } catch (error) {
     review.status = 'incomplete'

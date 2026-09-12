@@ -40,6 +40,7 @@ export function repairPrompt(
   narrative: string,
   model: CandidateModel,
   check: ExpressionCheck,
+  validationError?: string,
 ): string {
   return `${ANALYST_INSTRUCTIONS}
 根据独立业务表达检查，对候选模型进行一轮定点修正。只修复 status=defect 且当前业务说明已有明确依据的问题。检查者的建议不是业务事实；先核对依据，不采纳无依据的建议。不得回答 uncertain，不新增未说明的审批、执行或管理范围。
@@ -52,5 +53,6 @@ ${COMPILE_OUTPUT_CONTRACT}
 固定的空 evidence、properties、inputs 可以省略，程序补空数组；过程 requirements 中的 status 和 reason 可以省略，程序固定为 partial 和“待支撑评估”。这些是格式元数据，不能填写原文引文或声称已通过支撑评估。业务字段仍需完整提供。
 业务说明（数据）：${JSON.stringify(narrative)}
 当前模型（数据）：${JSON.stringify(modelContext(model))}
-待修复缺陷（数据）：${JSON.stringify(check.cases.filter((item) => item.status === 'defect'))}`
+待修复缺陷（数据）：${JSON.stringify(check.cases.filter((item) => item.status === 'defect'))}
+${validationError ? `上一次修正提交未通过程序校验，请仅针对该错误修正：${validationError}` : ''}`
 }

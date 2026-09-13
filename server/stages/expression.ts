@@ -31,7 +31,17 @@ async function runExpressionCheck(
       // Provider failures are not recoverable by changing the prompt; let
       // the outer stage preserve an incomplete review. Retry only malformed
       // or structurally invalid checker output.
-      if (!formatError.includes('业务表达检查')) throw error
+      const retryable = [
+        '业务表达检查',
+        '复查必须',
+        '复查遗漏',
+        '复查用例',
+        '重复检查用例',
+        '检查用例',
+        '可表达用例',
+        '未解决用例',
+      ].some((marker) => formatError.includes(marker))
+      if (!retryable) throw error
       if (attempt === 1) throw error
       options.onEvent?.({
         type: 'phase',

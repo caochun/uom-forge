@@ -58,14 +58,14 @@ export async function checkOrRepairCompiledJson(
   }
   const agent = new Agent({
     initialState: {
-      systemPrompt: '你是模型 JSON 修复 Agent。只修复程序报告的 JSON 语法、结构、ID 或引用错误，不重新设计业务，不增加、删除或改写建模说明中的业务语义。先调用 validate_json；根据具体错误定点修复，再次校验；通过后调用 finish_json。工具参数 json 必须是完整纯 JSON。',
+      systemPrompt: '你是模型 JSON 修复 Agent。只修复程序报告的 JSON 语法、结构、ID 或引用错误，不重新设计业务，不增加、删除或改写建模说明中的业务语义。第一回合必须调用 validate_json；根据具体错误定点修复，再次校验；通过后立即调用 finish_json。最多修复两次，第四回合前必须提交；不要输出解释性长文。工具参数 json 必须是完整纯 JSON。',
       model: modelFor(provider, env),
       thinkingLevel: 'minimal',
       tools: [validateTool, finishTool],
     },
     streamFn: (streamModel, context, streamOptions) => streamSimple(streamModel as Model<'openai-completions'>, context, { ...streamOptions, apiKey: provider === 'gpt' ? env.GPT_API_KEY : env.LLM_API_KEY, maxTokens: 24000 }),
   })
-  agent.shouldStopAfterTurn = () => turns >= 3
+  agent.shouldStopAfterTurn = () => turns >= 5
   agent.subscribe((event) => {
     if (event.type === 'turn_start') turns += 1
     if (event.type === 'tool_execution_start') options.onEvent?.({ type: 'phase', part: 'compile', text: 'Pi Agent 正在检查模型 JSON。' })

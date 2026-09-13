@@ -163,6 +163,24 @@ test('fact defect gets one atomic repair, frozen cases are rechecked, and checkp
   assert.equal(checkpoints[0].model.relations.length, 0)
 })
 
+test('malformed expression check is retried once with validator feedback', async () => {
+  let calls = 0
+  const prompts: string[] = []
+  const result = await checkAndRepair(
+    compiled(),
+    narrative,
+    async (prompt) => {
+      prompts.push(prompt)
+      calls++
+      return calls === 1 ? '{"cases":[]}' : rawCheck({ ...check, cases: check.cases.map((item) => ({ ...item, status: 'expressed', elements: ['matter'], explanation: '模型已明确。', gap: '', suggestion: '' })) })
+    },
+    {},
+  )
+  assert.equal(calls, 2)
+  assert.equal(result.expressionReview.status, 'passed')
+  assert.match(prompts[1], /输出未通过程序校验/)
+})
+
 test('unresolved business facts are retained without selecting an answer or entering the repair loop', async () => {
   let calls = 0
   const clarification = {

@@ -11,6 +11,39 @@ import {
 } from '../validation/expression.ts'
 import { errorMessage } from '../validation/values.ts'
 
+async function runExpressionCheck(
+  narrative: string,
+  model: ModelingResult['model'],
+  runTurn: RunTurn,
+  options: StageOptions,
+  previous?: import('../../shared/expression.ts').ExpressionCheck,
+): Promise<import('../../shared/expression.ts').ExpressionCheck> {
+  let formatError = ''
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await runTurn(
+      expressionPrompt(narrative, model, previous, formatError),
+      scopedTurn(options, previous ? 'recheck' : 'expression'),
+    )
+    try {
+      return parseExpressionCheck(raw, narrative, model, previous)
+    } catch (error) {
+      formatError = errorMessage(error)
+      // Provider failures are not recoverable by changing the prompt; let
+      // the outer stage preserve an incomplete review. Retry only malformed
+      // or structurally invalid checker output.
+      if (!formatError.includes('业务表达检查')) throw error
+      if (attempt === 1) throw error
+      options.onEvent?.({
+        type: 'phase',
+        part: previous ? 'recheck' : 'expression',
+        text: '检查结果格式无效，正在请求一次结构化重试。',
+      })
+    }
+    options.signal?.throwIfAborted()
+  }
+  throw new Error('业务表达检查未返回有效结果。')
+}
+
 // Bound cost and preserve every valid candidate before invoking more inference.
 export async function checkAndRepair(
   result: Omit<ModelingResult, 'expressionReview'>,
@@ -39,14 +72,7 @@ export async function checkAndRepair(
   publish()
   try {
     phase('expression', '检查候选模型能否表达具体业务事实。')
-    const first = parseExpressionCheck(
-      await runTurn(
-        expressionPrompt(narrative, model),
-        scopedTurn(options, 'expression'),
-      ),
-      narrative,
-      model,
-    )
+    const first = await runExpressionCheck(narrative, model, runTurn, options)
     options.signal?.throwIfAborted()
     review.snapshots[0].check = first
     review.warnings.push(...first.warnings)
@@ -104,13 +130,11 @@ export async function checkAndRepair(
       review.status = 'checking'
       publish()
       phase('recheck', '复查原有业务事实及相关语义，检查是否产生回归。')
-      const next = parseExpressionCheck(
-        await runTurn(
-          expressionPrompt(narrative, model, previousCheck),
-          scopedTurn(options, 'recheck'),
-        ),
+      const next = await runExpressionCheck(
         narrative,
         model,
+        runTurn,
+        options,
         previousCheck,
       )
       options.signal?.throwIfAborted()

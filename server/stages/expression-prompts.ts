@@ -9,6 +9,7 @@ export function expressionPrompt(
   narrative: string,
   model: CandidateModel,
   previous?: ExpressionCheck,
+  formatError?: string,
 ): string {
   return `${ANALYST_INSTRUCTIONS}
 第二阶段内部业务表达检查。你是独立检查者，只看当前业务说明与实际候选模型。先从业务说明找出重要的具体业务事实与条件，再尝试用候选模型表达，不能仅从模型已有名词挑选容易通过的检查。
@@ -33,7 +34,8 @@ ${
     : ''
 }
 业务说明段落（数据）：${JSON.stringify(understandingPassages(narrative))}
-候选模型（数据）：${JSON.stringify(modelContext(model))}`
+候选模型（数据）：${JSON.stringify(modelContext(model))}
+${formatError ? `上一次检查输出未通过程序校验，请只修正输出格式后重新返回完整 JSON：${formatError}` : ''}`
 }
 
 export function repairPrompt(

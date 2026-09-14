@@ -22,7 +22,7 @@ export function validateDocument(
       !block.text.trim() ||
       ids.has(block.id)
     )
-      throw new Error('文档证据块无效或重复，请重新导入。')
+      throw new Error('文档正文片段无效或重复，请重新导入。')
     ids.add(block.id)
     length += block.text.length
   }

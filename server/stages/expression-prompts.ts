@@ -1,6 +1,5 @@
 import type { CandidateModel } from '../../shared/model.ts'
 import type { ExpressionCheck } from '../../shared/expression.ts'
-import { understandingPassages } from '../../shared/expression.ts'
 import { ANALYST_INSTRUCTIONS } from './prompts.ts'
 import { COMPILE_OUTPUT_CONTRACT } from './output-contract.ts'
 import { modelContext } from './model-context.ts'
@@ -18,22 +17,22 @@ export function expressionPrompt(
 检查涉及多对象事实时，先构造最小实例：用 A、B、C 指代不同业务实例，写清两种有业务差别的安排。explanation 必须给出模型怎样绑定这些实例，或者说明缺少哪一步。例如共同归属不能唯一确定直接参与者；“应校核相关资源”只是义务，不能替代如何确定是哪一个资源。如果两种安排落入完全相同的对象与关联，且描述也未规定如何区分，应判 defect。规则已用自然语言明确区分则接受，不要求细化属性表。避免把规则全文换一种说法当作 scenario。
 status：expressed=能指出实际模型元素及其如何表达；defect=业务说明已明确，但模型遗漏、混淆或矛盾，可按已知语义修正；uncertain=业务本身仍有歧义，不能擅自选答案。未细化技术字段、范围外需求或另一种可选设计不是缺陷。引用真实元素 id；也可引用模型级字段 boundaries 或 summary；完全缺失可用 []。每个 defect/uncertain 必须给出具体 gap 和建议。不要把缺陷改成业务问题。用户已确认的信息优先于对应旧的不确定说明。
 属性含义可以在对象描述中表达，不因 properties=[] 就判缺失或要求独立对象。自关联只有在两个不同实例确有业务联系时成立；把姓名、状态、评分等对象自身信息画成同一个实例指向自身的边，不增加表达能力。说明推导路径及其约束是否足够确定业务事实，不以增加对象数量为修正目标。
-覆盖主要业务联系、业务分支、状态变化、规则与只读边界，不预设凑数目标。每个用例描述一种可检验的业务区别，避免长篇复述。
+优先检查最能区分模型边界的代表性业务情形，覆盖主要业务联系、业务分支、状态变化、规则与只读边界，不追求穷尽或凑数。每个用例描述一种可检验的业务区别，避免长篇复述。
 ${
   previous
     ? '只输出紧凑 JSON：{summary:string,judgments:[{id:string,status:"expressed"|"defect"|"uncertain",elements:string[],explanation:string,gap:string,suggestion:string}],additionalCases:[],clarifications:[]}。judgments 覆盖每一个已有用例，只返回判断，不复述原事实、依据和情形。需要新增用例时放入 additionalCases，其结构与首次 cases 相同。'
-    : '只输出紧凑 JSON：{summary:string,cases:[{id:string,fact:string,basisIds:string[],scenario:string,status:"expressed"|"defect"|"uncertain",elements:string[],explanation:string,gap:string,suggestion:string}],clarifications:[]}'
+    : '只输出紧凑 JSON：{summary:string,cases:[{id:string,fact:string,basis:string,scenario:string,status:"expressed"|"defect"|"uncertain",elements:string[],explanation:string,gap:string,suggestion:string}],clarifications:[]}'
 }
-业务说明已按段落编号。basisIds 引用支持事实的实际段落 id（如 U1），至少一个，不抄写引文，程序会回填原句。expressed 的 gap/suggestion 可为空。至少一个用例。
+每个 case 的 basis 必须直接摘录业务说明中的原文文字，至少一段；不要编造、改写或使用段落编号、块 ID 或位置标识。expressed 的 gap/suggestion 可为空。至少一个用例。
 业务本身未明确与模型可以保存未知边界是两件事；业务未明确的用例仍为 uncertain，不能因模型写了“待确认”就改判 expressed。复查没有新的用户答案，不能宣告业务歧义已经解决。
-仅新发现实质业务歧义且不与业务说明的问题重复时，clarifications 可列 {text,basisIds:string[],ambiguity,impact,options:string[],multiple:boolean}；basisIds 同样引用实际业务说明段落，ambiguity 写有依据的不同解释，impact 写对本轮模型的影响，优先有限答案选项。通常保持 []。
+仅新发现实质业务歧义且不与业务说明的问题重复时，clarifications 可列 {text,basis:string,ambiguity,impact,options:string[],multiple:boolean}；basis 同样必须是业务说明中的原文文字，ambiguity 写有依据的不同解释，impact 写对本轮模型的影响，优先有限答案选项。通常保持 []。
 ${
   previous
     ? `这是修正后的复查。下面已有用例的事实、依据和情形由程序固定，逐个重新判断（包括原来可表达的用例），不能删除或弱化失败用例；必要时补充新用例以检查共同语义回归。不给出此前结论，依据当前模型重新判断。
-已有用例（数据）：${JSON.stringify(previous.cases.map(({ id, fact, basisIds, scenario }) => ({ id, fact, basisIds, scenario })))}`
+已有用例（数据）：${JSON.stringify(previous.cases.map(({ id, fact, basis, scenario }) => ({ id, fact, basis, scenario })))}`
     : ''
 }
-业务说明段落（数据）：${JSON.stringify(understandingPassages(narrative))}
+业务说明（数据）：${JSON.stringify(narrative)}
 候选模型（数据）：${JSON.stringify(modelContext(model))}
 ${formatError ? `上一次检查输出未通过程序校验，请只修正输出格式后重新返回完整 JSON：${formatError}` : ''}`
 }

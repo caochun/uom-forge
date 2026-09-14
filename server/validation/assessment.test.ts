@@ -65,7 +65,7 @@ test('assessment rejects missing fields and unsupported references instead of in
 test('model-only assessment rejects fabricated source citations and leaves input intact', () => {
   const input = assessment(
     ['object'],
-    [{ blockId: 'b1', quote: '未经提供的文档' }],
+    [{ quote: '未经提供的文档' }],
   )
   assert.throws(() => parseAssessment(input, model), /评估结构不完整/)
   assert.equal(input.processAssessments[0].evidence.length, 1)

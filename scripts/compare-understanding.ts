@@ -23,7 +23,7 @@ const { values } = parseArgs({
 })
 if (!values.input || !values.output)
   throw new Error(
-    'Usage: npx tsx scripts/compare-understanding.ts --input input.json --output output-directory [--provider deepseek|gpt]',
+    'Usage: npx tsx scripts/compare-understanding.ts --input input.json --output output-directory [--provider deepseek|gpt|qwen]',
   )
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

@@ -99,7 +99,6 @@ async function compileReviewedPlan(
     const usePi = options.runtime === 'pi' || (options.runtime === undefined && process.env.UOM_AGENT_RUNTIME === 'pi')
     if (!initialValidation.valid && usePi) {
       raw = await checkOrRepairCompiledJson(
-        semanticPlan,
         raw,
         options.provider || 'gpt',
         initialValidation.error,

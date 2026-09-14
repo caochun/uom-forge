@@ -3,7 +3,7 @@ import type { ExpressionCheck, ModelChange } from '../../shared/expression.ts'
 import type { CandidateModel } from '../../shared/model.ts'
 import type { BusinessClarification } from '../../shared/analysis.ts'
 import { MODEL_COLLECTIONS } from '../../shared/model.ts'
-import { understandingPassages } from '../../shared/expression.ts'
+import { containsBasis } from '../../shared/clarifications.ts'
 import {
   CLARIFICATION_SCHEMA,
   validateClarifications,
@@ -13,27 +13,8 @@ import { validateCompiledModel } from './compiled-model.ts'
 
 const text = { type: 'string', minLength: 1, pattern: '\\S' }
 const ajv = new Ajv({ allErrors: true })
-type CheckOutput = Omit<
-  ExpressionCheck,
-  'cases' | 'clarifications' | 'warnings'
-> & {
-  cases: Omit<ExpressionCheck['cases'][number], 'basis'>[]
-  clarifications: unknown[]
-}
-const { basis: _basis, ...clarificationProperties } =
-  CLARIFICATION_SCHEMA.properties
-const validateQuestion = ajv.compile<
-  Omit<BusinessClarification, 'basis'> & { basisIds: string[] }
->({
-  ...CLARIFICATION_SCHEMA,
-  required: CLARIFICATION_SCHEMA.required.map((key) =>
-    key === 'basis' ? 'basisIds' : key,
-  ),
-  properties: {
-    ...clarificationProperties,
-    basisIds: { type: 'array', minItems: 1, uniqueItems: true, items: text },
-  },
-})
+type CheckOutput = ExpressionCheck & { clarifications: unknown[] }
+const validateQuestion = ajv.compile<BusinessClarification>(CLARIFICATION_SCHEMA)
 const validate = ajv.compile<CheckOutput>({
   type: 'object',
   additionalProperties: false,
@@ -50,7 +31,7 @@ const validate = ajv.compile<CheckOutput>({
         required: [
           'id',
           'fact',
-          'basisIds',
+          'basis',
           'scenario',
           'status',
           'elements',
@@ -61,12 +42,7 @@ const validate = ajv.compile<CheckOutput>({
         properties: {
           id: text,
           fact: text,
-          basisIds: {
-            type: 'array',
-            minItems: 1,
-            uniqueItems: true,
-            items: text,
-          },
+          basis: text,
           scenario: text,
           explanation: text,
           status: { enum: ['expressed', 'defect', 'uncertain'] },
@@ -115,8 +91,6 @@ export function parseExpressionCheck(
               }),
             ),
           ]
-        if (Array.isArray(item.basisIds))
-          item.basisIds = [...new Set(item.basisIds)]
       }
     }
   }
@@ -139,7 +113,7 @@ export function parseExpressionCheck(
     const judgments = value.judgments
     if (judgments.length !== previous.cases.length)
       throw new Error('复查遗漏或增加了原有用例判断。')
-    const cases = previous.cases.map(({ basis: _basis, ...prior }) => {
+    const cases = previous.cases.map((prior) => {
       const matches = judgments.filter(
         (item) => isRecord(item) && item.id === prior.id,
       )
@@ -186,14 +160,11 @@ export function parseExpressionCheck(
       `业务表达检查结构无效：${ajv.errorsText(validate.errors).slice(0, 800)}`,
     )
   const seen = new Set<string>()
-  const passages = new Map(
-    understandingPassages(narrative).map((item) => [item.id, item.text]),
-  )
   for (const item of value.cases) {
     if (seen.has(item.id)) throw new Error(`重复检查用例：${item.id}`)
     seen.add(item.id)
-    if (item.basisIds.some((id) => !passages.has(id)))
-      throw new Error(`检查用例 ${item.id} 的依据段落不在业务说明中。`)
+    if (!containsBasis(narrative, item.basis))
+      throw new Error(`检查用例 ${item.id} 的依据不在业务说明中。`)
     if (item.elements.some((id) => !ids.has(id)))
       throw new Error(`检查用例 ${item.id} 引用了不存在的模型元素。`)
     if (item.status === 'expressed' && !item.elements.length)
@@ -209,7 +180,7 @@ export function parseExpressionCheck(
     if (
       !item ||
       (['fact', 'scenario'] as const).some((key) => item[key] !== prior[key]) ||
-      JSON.stringify(item.basisIds) !== JSON.stringify(prior.basisIds)
+      item.basis !== prior.basis
     )
       throw new Error(
         `复查遗漏或改变了原有用例 ${prior.id}，不能据此判为通过。`,
@@ -222,15 +193,10 @@ export function parseExpressionCheck(
   for (const [index, question] of value.clarifications.entries()) {
     try {
       if (!validateQuestion(question)) throw new Error('结构不完整')
-      if (question.basisIds.some((id) => !passages.has(id)))
-        throw new Error('引用的业务说明段落不存在')
-      const { basisIds, ...fields } = question
-      const item = {
-        ...fields,
-        basis: basisIds.map((id) => passages.get(id)!).join('\n\n'),
-      }
-      validateClarifications([...clarifications, item], narrative)
-      clarifications.push(item)
+      if (!containsBasis(narrative, question.basis))
+        throw new Error('引用的业务说明文字不存在')
+      validateClarifications([...clarifications, question], narrative)
+      clarifications.push(question)
     } catch (error) {
       warnings.push(
         `检查中的第 ${index + 1} 项业务澄清未进入问题目录：${error instanceof Error ? error.message : String(error)}。`,
@@ -241,10 +207,7 @@ export function parseExpressionCheck(
     ...value,
     clarifications,
     warnings,
-    cases: value.cases.map((item) => ({
-      ...item,
-      basis: item.basisIds.map((id) => passages.get(id)!).join('\n\n'),
-    })),
+    cases: value.cases,
   }
 }
 

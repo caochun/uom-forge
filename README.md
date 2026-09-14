@@ -46,11 +46,13 @@ every call receives explicit stage inputs, without earlier conversation history.
 
 建模说明使用“建模判断与边界”解释设计取舍、适用范围、暂不细化内容及未明确语义，模型以 `boundaries` 保留这些陈述，并在相关元素定义中表达限制。页面只在建模说明中展示相关解释，不再单独列出边界区域；`boundaries` 仍供模型自述和业务过程支撑评估使用。候选模型不再包含 `questions`。旧模型问题只作为本地历史内容保留，不进入新一轮的模型参考。
 
+第二阶段采用过程支撑驱动的软方法学：模型先理解需要支撑的业务过程，围绕代表性业务情形持续判断当前对象、关系、操作、能力和规则能否表达真实事实；只有遇到实际表达缺口才调整模型，不以概念数量、段落数量或固定检查清单为目标。direct 在一次语义调用中完成这类自我判断；Pi Agent 可以按需调用独立检查获取建议，但检查意见不是必须逐项消除的闸门。两者之后都经过同一套候选编译和核心业务表达检查。
+
 建模新发现的业务歧义只有在不同答案会改变本轮模型时才提出，必须包含当前业务理解中的原句依据、不同解释以及对模型的影响，并优先提供可选答案。A 在可选的“需要补充的业务信息”章节中输出；程序检查必需信息及依据，发布给前端后统一进入业务理解的确认表单。B 只收到 A 的模型说明正文，澄清章节由程序提取，不让 B 重新生成问题。原始输出仍完整保留。已有问题按规范化的问题文本去重，不重开已经回答的同一问题；语义不同的改写是否重复仍依赖模型判断和用户审阅。
 
 原文保留在文档页及项目草稿中，第二阶段的 `evidence` 一律为空。候选模型详情专注业务边界与联系，不展示空属性、空引文警告。自述和评估只读取候选模型的业务语义，剔除原文引证和建模阶段的待评估标记，不接收原文、业务理解、问题答案或讨论历史。评估检验模型能否表达其中声明的业务过程与要求，不证明模型覆盖了原文的全部业务。
 
-候选整理后，以当前业务理解和实际候选开展独立业务表达检查：从说明提取具体事实，检查能否区分有业务差别的情形。只有已有明确依据的模型缺陷才自动进行一轮局部修正，然后复查原有用例。业务歧义保留，不能自动回答。修正破坏原先可表达的事实时恢复初始候选，所有尝试保留。该检查位于模型构造内部；最终模型自述和过程支撑评估仍然只接收候选模型。
+候选整理后，以当前业务理解和实际候选开展独立业务表达检查：优先选择最能区分模型边界的代表性事实，检查能否区分有业务差别的情形。只有已有明确依据的模型缺陷才自动进行一轮局部修正，然后复查原有用例。业务歧义保留，不能自动回答。修正破坏原先可表达的事实时恢复初始候选，所有尝试保留。该检查位于模型构造内部；最终模型自述和过程支撑评估仍然只接收候选模型。
 
 `/api/analyze/stream` 返回 SSE，model 请求体使用 `{ stage: 'model', narrative, model?, instruction?, provider }`，无需 document 或完整 understanding。`/api/analyze` 采用相同输入及完整第二阶段实现，返回非流式结果。结果包含 `expressionReview`（初始及修正快照、检查用例、修改原因、状态）；流式 `model-checkpoint` 在后续推理前保存有效候选。缺少 narrative 会拒绝建模。
 
@@ -76,7 +78,7 @@ Pi loop 使用 `UOM_PI_TIMEOUT_MS` 限制单个阶段的总时长（默认 300 �
 npx tsx scripts/compare-understanding.ts --input /path/to/input.json --output /path/to/results --provider gpt
 ```
 
-输入包含 `document`（与分析接口相同的证据块格式）和 `baselinePrompt`（包含同一文档的完整旧提示词）。结果保留两侧原始输出、流式事件和耗时。评价应针对准确性、完整性、可读性与无依据推断；单次对照不代表稳定质量结论。领域样例与结果放在工作区外，不加入产品提示词。
+输入包含 `document`（解析后的正文文本及编辑器数据）和 `baselinePrompt`（包含同一文档的完整旧提示词）。结果保留两侧原始输出、流式事件和耗时。评价应针对准确性、完整性、可读性与无依据推断；单次对照不代表稳定质量结论。领域样例与结果放在工作区外，不加入产品提示词。
 
 保留的 ACP 手动实验（不经过应用提供方入口，需要单独配置 Codex）：同一提示词对照 Codex 推理强度。
 
@@ -96,7 +98,7 @@ npx tsx scripts/compare-reasoning.ts --input /path/to/document.json --output /pa
 
 业务文档视图使用 `src/components/evidence/qq-doc-clone` 子模块中的
 `QQDocEditor` 作为证据阅读组件。Forge 以嵌入、只读模式加载文档，保留原始文档的
-排版和后续证据定位能力；QQ 文档组件本身仍作为独立项目维护，Forge 不复制其实现。
+排版和原文查看能力；QQ 文档组件本身仍作为独立项目维护，Forge 不复制其实现。
 上传入口支持 DOCX、Markdown、TXT 和 HTML；DOCX 在浏览器端转换为 HTML 后交给编辑器展示。
 
 子模块更新后，在本目录执行：
@@ -112,17 +114,19 @@ npm run dev
 ```
 
 The DeepSeek provider uses `LLM_API_URL`, `LLM_API_KEY` and `LLM_MODEL`;
-the GPT provider uses `GPT_API_URL`, `GPT_API_KEY` and `GPT_MODEL`.
-Both use streaming Chat Completions over HTTP and expose the same staged
+the GPT provider uses `GPT_API_URL`, `GPT_API_KEY` and `GPT_MODEL`; the Qwen
+provider uses `QWEN_API_URL`, `QWEN_API_KEY` and `QWEN_MODEL`.
+All three use streaming Chat Completions over HTTP and expose the same staged
 interface and return the same validated provider-neutral model containing objects,
-relations, actions, functions, rules, activities, boundaries and block-level evidence.
+relations, actions, functions, rules, activities, boundaries and textual evidence.
 `/api/discuss` uses the selected provider through the same interface.
 
-The UI starts with DeepSeek and the Pi Agent runtime on every page load; users can switch
-provider or runtime for the current session. Previously saved provider preferences do not
-override this default;
-the server and command-line scripts also default to GPT when no provider is specified.
-Set `UOM_LLM_PROVIDER=deepseek` or `gpt` to override that server/script default;
+The UI and shared protocol constants default to DeepSeek and the Pi Agent runtime. Users
+can switch provider or runtime for the current session. Previously saved provider
+preferences do not override this default. The server and command-line provider resolver
+also default to DeepSeek. Set `UOM_LLM_PROVIDER=deepseek`, `gpt` or `qwen` to override
+the provider default; the server uses Pi when a request selects it or when
+`UOM_AGENT_RUNTIME=pi` is set.
 an explicit request or `--provider` choice takes precedence.
 Credentials are loaded from the parent UOM `.env` and remain server-side.
 API URLs accept either a base URL ending in `/v1` or the full `/chat/completions` endpoint.
@@ -131,6 +135,10 @@ while retaining streaming output and the configured `LLM_MODEL`.
 `LLM_MAX_OUTPUT_TOKENS` sets its output limit (default: 16384) to allow longer
 candidate models to finish. A response cut off by the upstream limit still fails
 validation; partial JSON is never accepted as a model.
+
+Qwen uses `QWEN_MAX_OUTPUT_TOKENS` (default `16384`) and does not send provider-
+specific reasoning parameters, so the endpoint can remain a standard
+OpenAI-compatible Chat Completions service.
 
 GPT uses the configured model (default `gpt-6-astra`) with
 `GPT_REASONING_EFFORT=medium` by default. It sends `reasoning_effort` and does not

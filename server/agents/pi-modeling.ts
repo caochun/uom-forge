@@ -6,15 +6,23 @@ import type { RunTurn } from '../providers/types.ts'
 import type { StageOptions } from '../stages/contracts.ts'
 import { semanticModelPrompt } from '../stages/prompts.ts'
 import { piSignal } from './runtime.ts'
+import { requireModelProviderConfig } from '../providers/model-config.ts'
 
 const finishSchema = Type.Object({ semanticPlan: Type.String({ description: '完整建模说明 Markdown' }) })
 const checkSchema = Type.Object({ semanticPlan: Type.String({ description: '当前完整建模说明 Markdown' }) })
+const REQUIRED_SECTIONS = [
+  '## 模型概述',
+  '## 对象及边界',
+  '## 关系',
+  '## 业务操作',
+  '## 只读能力',
+  '## 业务规则',
+  '## 业务过程',
+]
 
 function modelFor(provider: ProviderId, env: NodeJS.ProcessEnv): Model<'openai-completions'> {
-  const model = provider === 'gpt' ? env.GPT_MODEL || 'gpt-6-astra' : env.LLM_MODEL || 'deepseek-chat'
-  const endpoint = provider === 'gpt' ? env.GPT_API_URL : env.LLM_API_URL
-  if (!endpoint) throw new Error(`${provider === 'gpt' ? 'GPT' : 'DeepSeek'} 未配置 API URL。`)
-  return { id: model, name: model, api: 'openai-completions', provider: provider === 'gpt' ? 'openai' : 'deepseek', baseUrl: endpoint.replace(/\/chat\/completions\/?$/, ''), reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 24000 }
+  const config = requireModelProviderConfig(provider, env)
+  return { id: config.model, name: config.model, api: 'openai-completions', provider: config.piProvider, baseUrl: config.url!.replace(/\/chat\/completions\/?$/, ''), reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 24000 }
 }
 
 function parseResult(text: string): { checked?: unknown; gaps?: { id?: unknown; status?: unknown; note?: unknown }[] } {
@@ -23,7 +31,7 @@ function parseResult(text: string): { checked?: unknown; gaps?: { id?: unknown; 
 }
 
 async function checkPlan(plan: string, narrative: string, runTurn: RunTurn, provider: ProviderId, signal?: AbortSignal) {
-  const prompt = `你是独立的本体建模评估员。只检查候选建模说明是否能表达业务理解中的关键主体、业务事项、可持续管理对象、业务事实联系、业务操作、只读能力、规则和端到端过程。不要重新设计模型，不评价格式。逐项检查候选说明中出现的每个对象、关系、操作、只读能力、规则和业务过程；遗漏或表达不足的项目放入 gaps。只输出 JSON：{"checked":true,"gaps":[{"id":"...","status":"partial|uncovered","note":"..."}]}。不得省略 checked 字段，不得用空结果代替未检查。
+  const prompt = `你是独立的本体建模评估员。只检查候选建模说明能否支撑业务理解中的核心业务过程，不重新设计模型，也不评价格式。先选择最能区分对象边界、关系上下文、业务分支、状态变化和持久记录的代表性业务情形，判断候选说明能否表达这些事实；不追求穷尽，也不要因为缺少技术字段或另一种可选设计而提出缺口。确有依据且影响核心过程表达的遗漏或混淆才放入 gaps。只输出 JSON：{"checked":true,"gaps":[{"id":"...","status":"partial|uncovered","note":"..."}]}。不得省略 checked 字段，不得用空结果代替未检查。
 业务理解：\n${narrative}\n\n候选建模说明：\n${plan}`
   const result = parseResult(await runTurn(prompt, { provider, signal, outputFormat: 'json' }))
   if (result.checked !== true || !Array.isArray(result.gaps))
@@ -37,31 +45,47 @@ export async function runPiModeling(input: ModelingInput, runTurn: RunTurn, opti
   const deadline = piSignal(options, 'Pi 语义建模')
   const model = modelFor(provider, env)
   let finished: string | undefined
-  let checked = ''
   let gaps: { id: string; status: string; note: string }[] = []
   let checks = 0
   let turns = 0
-  let accepting = false
-  const finishTool: AgentTool<typeof finishSchema> = { name: 'finish_modeling', label: '提交建模说明', description: '提交完整的候选建模说明；必须先通过独立检查。', parameters: finishSchema, execute: async (_id, args) => {
-    if (checked !== args.semanticPlan) return { content: [{ type: 'text', text: '请先用当前文本调用 check_modeling。' }], isError: true, details: { accepted: false } }
-    if (gaps.length && !accepting) return { content: [{ type: 'text', text: `仍有 ${gaps.length} 个建模缺口，请增量修正后重新检查。` }], isError: true, details: { gaps, accepted: false } }
+  let deliveryRetryQueued = false
+  let lastAssistantText = ''
+  let requireTool = false
+  const finishTool: AgentTool<typeof finishSchema> = { name: 'finish_modeling', label: '提交建模说明', description: '提交你认为能够支撑核心业务过程的完整候选建模说明；必要时先使用独立检查意见修正。', parameters: finishSchema, execute: async (_id, args) => {
     finished = args.semanticPlan
-    return { content: [{ type: 'text', text: accepting ? '建模说明已保留并标记待复核。' : '建模说明已提交。' }], details: { reviewRequired: accepting, gaps }, terminate: true }
+    return { content: [{ type: 'text', text: gaps.length ? '建模说明已提交，独立检查意见保留供复核。' : '建模说明已提交。' }], details: { reviewRequired: gaps.length > 0, gaps }, terminate: true }
   } }
-  const checkTool: AgentTool<typeof checkSchema> = { name: 'check_modeling', label: '检查业务过程支撑', description: '提交当前建模说明，由独立评估器检查业务语义覆盖和过程支撑。', parameters: checkSchema, execute: async (_id, args) => {
-    checks += 1; checked = args.semanticPlan; options.onEvent?.({ type: 'phase', part: 'semantic', text: '正在独立检查候选模型对业务的支撑。' }); gaps = await checkPlan(args.semanticPlan, input.narrative, runTurn, provider, deadline.signal); accepting = gaps.length > 0 && checks >= 2
+  const checkTool: AgentTool<typeof checkSchema> = { name: 'check_modeling', label: '检查业务过程支撑', description: '可选地提交当前建模说明，由独立评估器指出影响核心业务过程表达的缺口；检查结果是修正建议，不是新增业务事实。', parameters: checkSchema, execute: async (_id, args) => {
+    checks += 1; options.onEvent?.({ type: 'phase', part: 'semantic', text: '正在独立检查候选模型对业务的支撑。' }); gaps = await checkPlan(args.semanticPlan, input.narrative, runTurn, provider, deadline.signal)
     const text = gaps.length
-      ? checks >= 2
-        ? `第 ${checks} 次独立检查仍发现 ${gaps.length} 个缺口。请保留这些边界，立即调用 finish_modeling 提交当前完整建模说明，不要继续调用 check_modeling。`
-        : `发现 ${gaps.length} 个建模缺口，请增量修正后再次检查。`
-      : '候选模型已覆盖业务理解中的关键语义，请立即调用 finish_modeling。'
+      ? `独立检查发现 ${gaps.length} 个可能影响核心业务表达的缺口。请判断哪些确有依据，必要时修正；也可以保留合理的模型边界后提交。`
+      : '独立检查未发现影响核心业务表达的缺口，可以提交建模说明。'
     return { content: [{ type: 'text', text }], details: { gaps, check: checks, submitNow: checks >= 2 || gaps.length === 0 } }
   } }
-  const agent = new Agent({ initialState: { systemPrompt: '你是业务本体建模 Agent。依据业务理解生成候选建模说明，不输出 JSON。先调用 check_modeling，再根据独立评估缺口增量修正；最多检查两次。第二次检查后无论是否仍有缺口，都必须立即调用 finish_modeling 提交当前完整建模说明，保留未决边界，不要继续检查。保持对象、关系、业务操作、只读能力、规则和完整业务过程的语义边界；不要因格式需要发明业务概念。', model, thinkingLevel: 'minimal', tools: [checkTool, finishTool] }, streamFn: (streamModel, context, streamOptions) => streamSimple(streamModel as Model<'openai-completions'>, context, { ...streamOptions, apiKey: provider === 'gpt' ? env.GPT_API_KEY : env.LLM_API_KEY, maxTokens: 24000 }) })
+  const agent = new Agent({ initialState: { systemPrompt: '你是业务本体建模 Agent。依据业务理解形成能够支撑核心业务过程的最小候选建模说明。先理解业务过程并构造代表性业务情形，在对象、关系、业务操作、只读能力和规则之间持续判断能否表达这些事实；只有遇到真实表达缺口时才调整模型，不因格式或概念数量扩张模型。必要时调用 check_modeling 获取独立意见，结合业务依据判断是否修正；检查意见不是必须消除的清单。完成自己的判断后，必须调用 finish_modeling 提交完整建模说明；不要把建模说明正文作为最终文本回复。', model, thinkingLevel: 'minimal', tools: [checkTool, finishTool] }, streamFn: (streamModel, context, streamOptions) => streamSimple(streamModel as Model<'openai-completions'>, context, { ...streamOptions, ...(requireTool ? { toolChoice: 'required' as never } : {}), ...(provider === 'deepseek' && requireTool ? { samplingParams: { ...(streamOptions?.samplingParams || {}), thinking: { type: 'disabled' } } } : {}), apiKey: requireModelProviderConfig(provider, env).apiKey, maxTokens: 24000 }) })
   agent.shouldStopAfterTurn = () => turns >= 6
-  agent.subscribe((event) => { if (event.type === 'turn_start') turns += 1; if (event.type === 'tool_execution_start') options.onEvent?.({ type: 'phase', part: 'semantic', text: event.toolName === 'check_modeling' ? 'Pi Agent 正在检查候选模型。' : event.toolName === 'finish_modeling' ? 'Pi Agent 正在提交建模说明。' : `Pi Agent 正在执行 ${event.toolName}。` }); if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') options.onEvent?.({ type: 'delta', text: event.assistantMessageEvent.delta, size: event.assistantMessageEvent.delta.length }) })
+  agent.subscribe((event) => {
+    if (event.type === 'turn_start') turns += 1
+    if (event.type === 'tool_execution_start') {
+      requireTool = false
+      options.onEvent?.({ type: 'phase', part: 'semantic', text: event.toolName === 'check_modeling' ? 'Pi Agent 正在检查候选模型。' : event.toolName === 'finish_modeling' ? 'Pi Agent 正在提交建模说明。' : `Pi Agent 正在执行 ${event.toolName}。` })
+    }
+    if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') options.onEvent?.({ type: 'delta', text: event.assistantMessageEvent.delta, size: event.assistantMessageEvent.delta.length })
+    if (event.type === 'message_end' && event.message.role === 'assistant') {
+      lastAssistantText = event.message.content.filter((block) => block.type === 'text').map((block) => block.text).join('')
+    }
+    if (event.type === 'turn_end' && event.message.role === 'assistant' && event.toolResults.length === 0 && !finished && !deliveryRetryQueued) {
+      deliveryRetryQueued = true
+      requireTool = true
+      agent.followUp({ role: 'user', content: '你已经生成了建模说明。请不要再次直接输出正文，立即调用 finish_modeling，并将上一轮的完整建模说明原样放入 semanticPlan 参数。', timestamp: Date.now() })
+      options.onEvent?.({ type: 'phase', part: 'semantic', text: '建模说明已生成，正在请求 Agent 通过提交工具交接。' })
+    }
+  })
   options.onEvent?.({ type: 'phase', part: 'semantic', text: 'Pi Agent 正在形成候选建模说明。' })
   const abort = () => agent.abort(); deadline.signal.addEventListener('abort', abort, { once: true })
-  try { await agent.prompt(semanticModelPrompt(input)) } finally { deadline.signal.removeEventListener('abort', abort); deadline.dispose() }
-  deadline.signal.throwIfAborted(); if (!finished?.trim()) throw new Error('Pi Agent 未提交建模说明。'); return finished
+  try { await agent.prompt(semanticModelPrompt(input, 'tool')) } finally { deadline.signal.removeEventListener('abort', abort); deadline.dispose() }
+  deadline.signal.throwIfAborted()
+  if (!finished?.trim() && deliveryRetryQueued && REQUIRED_SECTIONS.every((section) => lastAssistantText.includes(section))) finished = lastAssistantText
+  if (!finished?.trim()) throw new Error('Pi Agent 未通过提交工具交接建模说明。')
+  return finished
 }

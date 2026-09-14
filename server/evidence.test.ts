@@ -32,9 +32,9 @@ test('rejects citations that do not exist in the submitted document', () => {
   assert.throws(
     () =>
       parseCandidateModel(
-        model([{ blockId: 'missing', quote: '不存在' }]),
+        model([{ quote: '不存在' }]),
         document,
       ),
-    /原文证据块/,
+    /引文不在原文/,
   )
 })

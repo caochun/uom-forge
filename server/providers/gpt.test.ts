@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createGptProvider } from './gpt.ts'
 import { createDeepSeekProvider } from './deepseek.ts'
+import { createQwenProvider } from './qwen.ts'
 import { resolveProvider } from './index.ts'
 import type { ProviderEvent } from '../../shared/analysis.ts'
 
@@ -14,6 +15,10 @@ const env = {
   LLM_API_URL: 'http://deepseek.invalid/v1',
   LLM_MODEL: 'configured-deepseek',
   LLM_API_TIMEOUT_MS: '1000',
+  QWEN_API_KEY: 'qwen-test-key',
+  QWEN_API_URL: 'http://qwen.invalid/v1',
+  QWEN_MODEL: 'configured-qwen',
+  QWEN_API_TIMEOUT_MS: '1000',
 }
 const body =
   'data: {"choices":[{"delta":{"content":"正文🙂"}}]}\n\n' +
@@ -85,6 +90,30 @@ test('GPT resolves configuration per call, isolates provider parameters and emit
   assert.ok(
     events.some((event) => event.type === 'delta' && event.text === '正文🙂'),
   )
+})
+
+test('Qwen resolves its independent OpenAI-compatible configuration', async () => {
+  const requests: { url: string; auth: string | null; body: unknown }[] = []
+  const qwen = createQwenProvider(async (url, init) => {
+    requests.push({
+      url: String(url),
+      auth: new Headers(init?.headers).get('authorization'),
+      body: JSON.parse(String(init?.body)) as unknown,
+    })
+    return new Response(body)
+  }, env)
+  assert.equal(await qwen('qwen turn', {}), '正文🙂')
+  assert.deepEqual(requests[0], {
+    url: 'http://qwen.invalid/v1/chat/completions',
+    auth: 'Bearer qwen-test-key',
+    body: {
+      model: 'configured-qwen',
+      stream: true,
+      max_tokens: 16384,
+      messages: [{ role: 'user', content: 'qwen turn' }],
+    },
+  })
+  assert.equal(resolveProvider('qwen'), 'qwen')
 })
 
 test('GPT requires its own credentials; Codex is explicitly disabled', async () => {

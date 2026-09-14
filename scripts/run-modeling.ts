@@ -21,7 +21,7 @@ const { values } = parseArgs({
 })
 if (Boolean(values.input) === Boolean(values['semantic-plan']))
   throw new Error(
-    'Specify --input input.json OR --semantic-plan plan.md [--provider deepseek|gpt]',
+    'Specify --input input.json OR --semantic-plan plan.md [--provider deepseek|gpt|qwen]',
   )
 const provider = resolveProvider(values.provider)
 const savedPlan = values['semantic-plan']

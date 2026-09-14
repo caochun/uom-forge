@@ -272,7 +272,7 @@ test('saved assessments retain requirement mappings and old conclusions never ga
             explanation: '主体已存在，但没有关联到事项',
             gap: '缺少联系',
             suggestion: '补充办理关系',
-            evidence: [{ blockId: 'b1', quote: '办理事项' }],
+            evidence: [{ quote: '办理事项' }],
           },
         ],
       },

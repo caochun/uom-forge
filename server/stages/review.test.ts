@@ -15,7 +15,7 @@ const model: CandidateModel = {
       name: '事项',
       description: '具有独立身份的事项。',
       properties: [],
-      evidence: [{ blockId: 'old', quote: 'QUOTE_CANARY' }],
+      evidence: [{ quote: 'QUOTE_CANARY' }],
     },
   ],
   relations: [],

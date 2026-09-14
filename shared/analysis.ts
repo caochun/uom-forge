@@ -75,14 +75,15 @@ export interface ModelingResult {
   provenance: { basis: 'business-understanding'; evidence: 'unlinked' }
   validation: { elements: number; warnings: string[] }
 }
-export type ProviderId = 'deepseek' | 'gpt'
-export const DEFAULT_PROVIDER: ProviderId = 'gpt'
+export type ProviderId = 'deepseek' | 'gpt' | 'qwen'
+export const DEFAULT_PROVIDER: ProviderId = 'deepseek'
 export const PROVIDERS: Record<ProviderId, { name: string; label: string }> = {
   deepseek: { name: 'DeepSeek', label: 'DeepSeek API' },
   gpt: { name: 'GPT', label: 'GPT API' },
+  qwen: { name: 'Qwen', label: 'Qwen API' },
 }
 export type AgentRuntimeId = 'direct' | 'pi'
-export const DEFAULT_RUNTIME: AgentRuntimeId = 'direct'
+export const DEFAULT_RUNTIME: AgentRuntimeId = 'pi'
 export const RUNTIMES: Record<AgentRuntimeId, { name: string; label: string }> = {
   direct: { name: '直接调用', label: '直接调用模型' },
   pi: { name: 'Pi Agent', label: 'Pi Agent' },

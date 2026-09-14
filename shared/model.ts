@@ -1,5 +1,4 @@
 export interface Evidence {
-  blockId: string
   quote: string
 }
 export interface Property {

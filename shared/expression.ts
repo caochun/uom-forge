@@ -6,7 +6,6 @@ export interface ExpressionCase {
   id: string
   fact: string
   basis: string
-  basisIds: string[]
   scenario: string
   status: 'expressed' | 'defect' | 'uncertain'
   elements: string[]
@@ -49,18 +48,6 @@ export const STAGE_PART_LABELS = {
   repair: '定点修正模型',
   recheck: '复查业务事实',
 } as const
-
-// Stable within one construction round. The model selects references; the
-// program copies source text, avoiding a second transcription task for the LLM.
-export function understandingPassages(
-  narrative: string,
-): { id: string; text: string }[] {
-  return narrative
-    .split(/\n\s*\n/)
-    .map((text) => text.trim())
-    .filter(Boolean)
-    .map((text, i) => ({ id: `U${i + 1}`, text }))
-}
 
 export function interruptReview(review: ExpressionReview): ExpressionReview {
   return review.status === 'checking' || review.status === 'repairing'

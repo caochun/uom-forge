@@ -8,7 +8,7 @@ const record = (properties: Record<string, SchemaObject>) => ({
   required: Object.keys(properties),
 })
 const list = (item: SchemaObject) => ({ type: 'array', items: item })
-export const evidence = list(record({ blockId: text, quote: text }))
+export const evidence = list(record({ quote: text }))
 const properties = list(
   record({
     name: text,

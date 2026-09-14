@@ -25,11 +25,7 @@ import type { StagePart } from '../shared/analysis.ts'
 
 const stages = ['understand', 'model', 'compile', 'narrate', 'assess'] as const
 const evidence = (value: unknown): Evidence[] =>
-  records(value).map((item) => ({
-    ...item,
-    blockId: text(item.blockId),
-    quote: text(item.quote),
-  }))
+  records(value).map((item) => ({ quote: text(item.quote) }))
 const element = (item: Record<string, unknown>) => ({
   ...item,
   id: text(item.id),
@@ -237,7 +233,6 @@ function readExpressionReview(value: unknown): ExpressionReview | undefined {
                 id: text(item.id),
                 fact: text(item.fact),
                 basis: text(item.basis),
-                basisIds: strings(item.basisIds),
                 scenario: text(item.scenario),
                 status:
                   item.status === 'expressed' || item.status === 'defect'
@@ -293,7 +288,8 @@ function readTimings(value: unknown): Project['timings'] {
         typeof item.callId !== 'string' ||
         (item.provider !== 'codex' &&
           item.provider !== 'deepseek' &&
-          item.provider !== 'gpt')
+          item.provider !== 'gpt' &&
+          item.provider !== 'qwen')
       )
         return []
       const status: TurnTiming['status'] =

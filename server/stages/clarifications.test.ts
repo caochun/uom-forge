@@ -33,14 +33,14 @@ const model: CandidateModel = {
   activities: [],
   boundaries: ['记录如何归属事项尚未确定。'],
 }
-const uncertainCheck = (_basis: string) =>
+const uncertainCheck = (basis: string) =>
   JSON.stringify({
     summary: '业务归属尚未明确。',
     cases: [
       {
         id: 'ownership',
         fact: '记录归属事项',
-        basisIds: ['U1'],
+        basis,
         scenario: '记录 R 属于事项 A 或 A/B，业务尚未确定。',
         status: 'uncertain',
         elements: [],

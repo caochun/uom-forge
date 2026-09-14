@@ -46,7 +46,6 @@ const check: ExpressionCheck = {
       id: 'ownership',
       fact: '成果属于一个事项',
       basis: narrative,
-      basisIds: ['U1'],
       scenario: '事项 A、B 均存在，成果 X 属于 A 而非 B。',
       status: 'defect',
       elements: ['matter', 'result'],
@@ -58,7 +57,6 @@ const check: ExpressionCheck = {
       id: 'identity',
       fact: '两个事项可分别引用',
       basis: narrative,
-      basisIds: ['U1'],
       scenario: '事项 A 与事项 B 有独立身份。',
       status: 'expressed',
       elements: ['matter'],
@@ -80,11 +78,8 @@ const compiled = (): Omit<ModelingResult, 'expressionReview'> => ({
 const rawCheck = (check: ExpressionCheck) =>
   JSON.stringify({
     summary: check.summary,
-    clarifications: check.clarifications.map(({ basis: _basis, ...item }) => ({
-      ...item,
-      basisIds: ['U1'],
-    })),
-    cases: check.cases.map(({ basis: _basis, ...item }) => item),
+    clarifications: check.clarifications,
+    cases: check.cases,
   })
 const rawRecheck = (check: ExpressionCheck) =>
   JSON.stringify({
@@ -214,7 +209,7 @@ test('unresolved business facts are retained without selecting an answer or ente
   assert.equal(result.expressionReview.status, 'issues')
   assert.deepEqual(result.model, model)
   assert.deepEqual(result.clarifications, [
-    { ...clarification, basis: narrative },
+    clarification,
   ])
 })
 
@@ -301,12 +296,12 @@ test('checks cannot fabricate evidence or IDs, drop passed cases or weaken froze
       parseExpressionCheck(
         rawCheck({
           ...check,
-          cases: [{ ...check.cases[0], basisIds: ['U999'] }],
+          cases: [{ ...check.cases[0], basis: '不存在的业务依据' }],
         }),
         narrative,
         model,
       ),
-    /依据段落不在/,
+    /依据不在/,
   )
   assert.throws(
     () =>
@@ -391,7 +386,7 @@ test('formatting normalization preserves meaning, while unknown names and unsupp
   const raw = JSON.parse(rawCheck(check))
   delete raw.clarifications
   raw.cases[0].elements = ['matter', 'matter', 'result']
-  raw.cases[0].basisIds = ['U1', 'U1']
+  raw.cases[0].basis = narrative
   const result = parseExpressionCheck(JSON.stringify(raw), narrative, model)
   assert.deepEqual(result.cases[0].elements, ['matter', 'result'])
   assert.equal(result.cases[0].basis, narrative)
@@ -408,7 +403,7 @@ test('formatting normalization preserves meaning, while unknown names and unsupp
       .elements,
     ['matter', 'result'],
   )
-  raw.clarifications = [{ text: '无依据问题', basisIds: ['U999'] }]
+  raw.clarifications = [{ text: '无依据问题', basis: '不存在的业务依据', ambiguity: '不明确', impact: '影响', options: ['A'], multiple: false }]
   const isolated = parseExpressionCheck(JSON.stringify(raw), narrative, named)
   assert.equal(isolated.cases.length, 2)
   assert.equal(isolated.warnings.length, 1)
@@ -447,7 +442,7 @@ test('repair can omit fixed empty metadata but cannot omit semantic fields or in
             ...repair.changes[0],
             value: {
               ...semantic,
-              evidence: [{ blockId: 'fake', quote: 'fake' }],
+              evidence: [{ quote: 'fake' }],
             },
           },
         ],

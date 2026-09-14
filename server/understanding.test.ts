@@ -26,7 +26,7 @@ test('reads once, publishes the narrative and extracts optional questions', asyn
       )
       assert.match(
         prompt,
-        /业务主体与业务事项|可持续管理的资源和业务产出|业务事实与对象联系/,
+        /业务范围与适用场景|业务主体与业务事项|对象及身份边界|业务事实与关系/,
       )
       options.onEvent?.({ type: 'delta', text: narrative })
       return narrative

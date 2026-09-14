@@ -824,7 +824,7 @@ function App() {
           <div className="runtime-choice">
             <span className="choice-label">模型</span>
             <div className="provider-switch" aria-label="推理提供方">
-              {(['deepseek', 'gpt'] as const).map((value) => (
+              {(['deepseek', 'gpt', 'qwen'] as const).map((value) => (
                 <button
                   key={value}
                   disabled={busy || discussing}

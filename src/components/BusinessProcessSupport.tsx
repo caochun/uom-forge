@@ -43,7 +43,6 @@ function EvidenceQuotes({ evidence }: { evidence: Evidence[] }) {
       {evidence.map((item, index) => (
         <blockquote key={index}>
           {item.quote}
-          <cite>{item.blockId}</cite>
         </blockquote>
       ))}
     </details>

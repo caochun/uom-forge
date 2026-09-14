@@ -18,19 +18,13 @@ export function validateEvidence(
     for (const citation of value.evidence) {
       if (
         !isRecord(citation) ||
-        typeof citation.quote !== 'string' ||
-        typeof citation.blockId !== 'string'
+        typeof citation.quote !== 'string'
       )
         throw new Error(`${location} 的引文格式无效。`)
-      const block = document.blocks.find((item) => item.id === citation.blockId)
-      if (
-        !block ||
-        !normalize(citation.quote) ||
-        !normalize(block.text).includes(normalize(citation.quote))
-      )
-        throw new Error(
-          `${location} 的引文不在原文证据块 ${citation.blockId} 中。`,
-        )
+      if (!normalize(citation.quote)) throw new Error(`${location} 的引文不能为空。`)
+      const source = document.blocks.map((item) => item.text).join('\n')
+      if (!normalize(source).includes(normalize(citation.quote)))
+        throw new Error(`${location} 的引文不在原文中。`)
     }
   for (const [key, child] of Object.entries(value))
     if (key !== 'evidence')

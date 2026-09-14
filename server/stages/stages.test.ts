@@ -102,7 +102,7 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
         objects: [
           {
             ...candidate().objects[0],
-            evidence: [{ blockId: 'b', quote: 'QUOTE_CANARY' }],
+            evidence: [{ quote: 'QUOTE_CANARY' }],
             source: 'SOURCE_CANARY',
           },
         ],
@@ -138,7 +138,7 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
             {
               id: 'c1',
               fact: '事项形成成果',
-              basisIds: ['U1'],
+              basis: 'NARRATIVE_ONLY',
               scenario: '事项 A 形成成果 B',
               status: 'expressed',
               elements: ['produces'],
@@ -177,6 +177,14 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
   )
 })
 
+test('compiler preserves relation context without domain-specific rules', () => {
+  const prompt = compileModelPrompt('PLAN')
+  assert.match(prompt, /关系语义保真检查/)
+  assert.match(prompt, /组成部分、顺序、角色、来源\/去向/)
+  assert.match(prompt, /代表性业务事实回放检查/)
+  assert.doesNotMatch(prompt, /馈线|变电站|双电源/)
+})
+
 test('missing narrative stops before invoking a provider', async () => {
   let calls = 0
   for (const narrative of ['', '  ', undefined, {}]) {
@@ -206,7 +214,7 @@ test('standalone compilation retries only B using the exact saved semantic plan'
             {
               id: 'c1',
               fact: '成果归属事项',
-              basisIds: ['U1'],
+              basis: 'NARRATIVE_ONLY',
               scenario: '甲事项形成乙成果',
               status: 'expressed',
               elements: ['produces'],
@@ -305,7 +313,7 @@ test('compiled output rejects missing fields, dangling references and invented e
       model.activities[0].requirements[0].elements = ['missing']
     },
     (model: CandidateModel) => {
-      model.objects[0].evidence = [{ blockId: 'pretend', quote: 'invented' }]
+      model.objects[0].evidence = [{ quote: 'invented' }]
     },
     (model: CandidateModel) => {
       model.activities[0].requirements[0].status = 'covered'
@@ -329,12 +337,35 @@ test('compiled output rejects missing fields, dangling references and invented e
   assert.throws(() => validateCompiledModel('{}'))
 })
 
+test('compiled output fills mechanical empty fields without requiring the model to repeat them', () => {
+  const model = candidate() as unknown as Record<string, unknown>
+  delete model.schemaVersion
+  delete model.boundaries
+  delete model.functions
+  for (const key of ['objects', 'relations', 'actions', 'functions', 'rules', 'activities']) {
+    for (const item of (model[key] || []) as Record<string, unknown>[]) {
+      delete item.evidence
+      if (key === 'objects' || key === 'relations') delete item.properties
+      if (key === 'actions' || key === 'functions') delete item.inputs
+    }
+  }
+  const activity = (model.activities as Record<string, unknown>[])[0]
+  delete activity.evidence
+  delete (activity.requirements as Record<string, unknown>[])[0].evidence
+  delete (activity.requirements as Record<string, unknown>[])[0].status
+  delete (activity.requirements as Record<string, unknown>[])[0].reason
+  const parsed = validateCompiledModel(JSON.stringify(model))
+  assert.equal(parsed.objects[0].evidence.length, 0)
+  assert.equal(parsed.relations[0].properties.length, 0)
+  assert.equal(parsed.activities[0].requirements[0].status, 'partial')
+})
+
 test('reading handoff reports missing sections without rewriting the explanation', () => {
   const narrative = UNDERSTANDING_SECTIONS.map(
     ({ title }) => `## ${title}\n材料未说明。`,
   ).join('\n\n')
   assert.deepEqual(understandingWarnings(narrative), [])
-  assert.equal(understandingWarnings('## 业务概述\n业务概述。').length, 8)
+  assert.equal(understandingWarnings('## 业务概述\n业务概述。').length, 10)
   const prompt = understandingPrompt({
     name: 'doc',
     blocks: [{ id: '1', text: 'DOCUMENT' }],
@@ -357,6 +388,6 @@ test('confirmation choices preserve commas and distinguish multiple selection fr
 
 test('prompts contain no sample domain vocabulary or source evidence requirement in semantic step', () => {
   const semantic = semanticModelPrompt({ narrative: '测试输入' })
-  assert.doesNotMatch(semantic, /供电|馈线|主变|融资租赁|高速|blockId/)
+  assert.doesNotMatch(semantic, /供电|馈线|主变|融资租赁|高速|blockId|basisIds/)
   assert.doesNotMatch(compileModelPrompt('PLAN'), /DOCUMENT/)
 })

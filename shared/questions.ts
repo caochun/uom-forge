@@ -1,4 +1,14 @@
 import type { Question } from './analysis.ts'
+
+const optionValues = (value: string): string[] => [
+  ...new Set(
+    value
+      .split(/[；;]/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ),
+]
+
 export function questionSection(questions: Question[]): string {
   if (!questions.length) return ''
   return (
@@ -72,21 +82,21 @@ export function extractQuestions(narrative: string): Question[] {
     if (option && current) {
       contextField = undefined
       // Semicolons are the delimiter; commas can be part of an answer.
-      current.options = [
-        ...new Set(
-          option[2]
-            .split(/[；;]/)
-            .map((item) => item.trim())
-            .filter(Boolean),
-        ),
-      ]
+      current.options = optionValues(option[2])
       if (option[1] === '多选') current.multiple = true
       continue
     }
     const item = /^(?:\d+[.)、]|[-*])\s+(.+)$/.exec(line)
     if (item) {
       contextField = undefined
-      current = { text: item[1], options: [] }
+      const inline = /^(.+?)\s*(选项|多选|可选答案)\s*[:：]\s*(.+)$/.exec(item[1])
+      current = inline
+        ? {
+            text: inline[1].trim(),
+            options: optionValues(inline[3]),
+            ...(inline[2] === '多选' ? { multiple: true } : {}),
+          }
+        : { text: item[1], options: [] }
       questions.push(current)
     } else if (current?.clarification && contextField && line) {
       current.clarification[contextField] += `\n${line}`

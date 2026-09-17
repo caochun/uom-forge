@@ -45,7 +45,7 @@ if (!Number.isInteger(rounds) || rounds < 1 || rounds > 5)
 if (!Number.isInteger(timeout) || timeout <= 0)
   throw new Error('timeout-ms must be a positive integer.')
 const env = {
-  ...loadEnv('development', path.resolve(import.meta.dirname, '../..'), ''),
+  ...loadEnv('development', path.resolve(import.meta.dirname, '..'), ''),
   ...process.env,
 }
 const input: unknown = JSON.parse(await readFile(values.input, 'utf8'))

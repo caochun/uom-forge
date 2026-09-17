@@ -22,6 +22,8 @@ import {
   STAGE_PART_LABELS,
 } from '../shared/expression.ts'
 import type { StagePart } from '../shared/analysis.ts'
+import type { SemanticPlanV2 } from '../shared/semantic.ts'
+import { validateSemanticPlan } from '../shared/semantic-validation.ts'
 
 const stages = ['understand', 'model', 'compile', 'narrate', 'assess'] as const
 const evidence = (value: unknown): Evidence[] =>
@@ -203,12 +205,22 @@ function readAssessment(value: unknown): Assessment | null {
 }
 function readPlan(value: unknown): SemanticPlan | null {
   if (!isRecord(value)) return null
+  const { semantic: storedSemantic, ...rest } = value
+  let semantic: SemanticPlanV2 | undefined
+  if (isRecord(storedSemantic)) {
+    try {
+      semantic = validateSemanticPlan(storedSemantic as unknown as SemanticPlanV2)
+    } catch {
+      semantic = undefined
+    }
+  }
   return {
-    ...value,
+    ...rest,
     plan: text(value.plan),
     complete: value.complete === true,
     compiled: value.compiled === true,
     warnings: strings(value.warnings),
+    ...(semantic ? { semantic } : {}),
   }
 }
 function readExpressionReview(value: unknown): ExpressionReview | undefined {

@@ -33,20 +33,23 @@ every call receives explicit stage inputs, without earlier conversation history.
 | 步骤 | 业务输入 | 输出 |
 | --- | --- | --- |
 | 1 业务理解 | 原始文档 | 按语义章节组织的 Markdown 业务说明 |
-| 2A 建模判断 | 业务说明；迭代时的当前候选模型与用户反馈 | Markdown 建模说明，无 Schema |
-| 2B 格式整理 | 仅 2A 建模说明 | 符合 MODEL_SCHEMA 的 JSON，由本地严格校验 |
+| 2A1 事实提取 | 业务说明 | 带原句依据、确定性和参与对象的最小业务事实 |
+| 2A2 业务故事 | 已校验事实 | 只引用事实 id 的目标、步骤和业务情形 |
+| 2A3 建模判断 | 业务说明、事实与故事；迭代时的当前候选模型与用户反馈 | Markdown 建模说明，无 Schema |
+| 2B 格式整理 | 2A3 建模说明与已校验语义计划 | 符合 MODEL_SCHEMA 的 JSON，由本地严格校验 |
 | 2C 业务表达检查 | 当前业务理解与实际候选 | 具体事实用例、表达缺陷与未决语义 |
 | 2D 定点修正及复查（有缺陷时） | 当前业务理解、候选与检查用例 | 一轮局部修正、复查与完整历史 |
+| 2E 事实映射 | 已校验事实、故事与最终候选 | 事实到真实模型元素 id 的完整、部分或缺失映射 |
 | 3 模型自述 | 仅候选模型 | 自然语言业务复述 |
 | 4 业务过程支撑评估 | 仅候选模型 | 模型声明的业务要求与对象、关系、行为及规则的逐项对照、缺口及改进建议 |
 
 第一阶段规范及其 11 项语义判断见 [语义交接规范](docs/semantic-handoff.md)。只调用一次模型，不再整理第二份阅读提纲。程序检查缺少的标题并提示，不能据此证明业务理解正确。待确认问题支持单选、多选和文字回答；保存答案会将确认说明并入当前业务理解，替代对应的不确定表述，未回答的问题继续保留。确认说明标明来自用户修订，不冒充原文；原始说明及问题目录留在本地草稿，供修改或撤回答案。
 
-第二阶段 A 不提供 JSON Schema；B 的业务输入只有 A 的结果，另外提供 `output-contract.ts` 中的紧凑格式说明。完整 JSON Schema 留在本地校验，不再重复展开到提示词。B 不接收第一阶段业务说明、原文、用户对话或完整旧模型。本轮先识别概念、关系和业务行为，不细化属性和输入字段；本地也检查属性和输入为空、业务过程支撑尚未评估。每次 API 调用只发送当前阶段输入，B 不继承 A 的额外上下文。选择 Pi 时，B 先由程序校验；只有 JSON 不合法时才启动 Pi 定点修复，Pi 必须根据程序返回的具体错误调用 `validate_json`，修复结果再次经过同一程序校验后才可接受。
+第二阶段先以独立结构化调用提取事实，再把事实组织成业务故事。模型负责理解自然语言，程序负责校验原句依据、唯一 id、步骤顺序和事实引用；两步的原始 JSON 不混入建模正文流。A 不提供模型 JSON Schema；B 接收 A 的建模说明和已校验的事实、故事，另外提供 `output-contract.ts` 中的紧凑格式说明。完整 JSON Schema 留在本地校验，不再重复展开到提示词。B 不接收原始文档、用户对话或完整旧模型。本轮先识别概念、关系和业务行为，不细化属性和输入字段；本地也检查属性和输入为空、业务过程支撑尚未评估。选择 Pi 时，B 先由程序校验；只有 JSON 不合法时才启动 Pi 定点修复，Pi 必须根据程序返回的具体错误调用 `validate_json`，修复结果再次经过同一程序校验后才可接受。
 
 建模说明使用“建模判断与边界”解释设计取舍、适用范围、暂不细化内容及未明确语义，模型以 `boundaries` 保留这些陈述，并在相关元素定义中表达限制。页面只在建模说明中展示相关解释，不再单独列出边界区域；`boundaries` 仍供模型自述和业务过程支撑评估使用。候选模型不再包含 `questions`。旧模型问题只作为本地历史内容保留，不进入新一轮的模型参考。
 
-第二阶段采用过程支撑驱动的软方法学：模型先理解需要支撑的业务过程，围绕代表性业务情形持续判断当前对象、关系、操作、能力和规则能否表达真实事实；只有遇到实际表达缺口才调整模型，不以概念数量、段落数量或固定检查清单为目标。direct 在一次语义调用中完成这类自我判断；Pi Agent 可以按需调用独立检查获取建议，但检查意见不是必须逐项消除的闸门。两者之后都经过同一套候选编译和核心业务表达检查。
+第二阶段采用过程支撑驱动的软方法学：direct 与 Pi 都先形成同一套事实和业务故事，再围绕代表性业务情形判断对象、关系、操作、能力和规则能否表达真实事实；只有遇到实际表达缺口才调整模型，不以概念数量、段落数量或固定检查清单为目标。Pi Agent 可以按需调用独立检查获取建议，并通过 `request_clarification` 登记有依据的业务歧义；检查意见不是必须逐项消除的闸门。两者之后都经过同一套候选编译和核心业务表达检查。最后针对检查或修正后的实际候选生成事实映射，因此映射只能引用最终模型中真实存在的元素 id。
 
 建模新发现的业务歧义只有在不同答案会改变本轮模型时才提出，必须包含当前业务理解中的原句依据、不同解释以及对模型的影响，并优先提供可选答案。A 在可选的“需要补充的业务信息”章节中输出；程序检查必需信息及依据，发布给前端后统一进入业务理解的确认表单。B 只收到 A 的模型说明正文，澄清章节由程序提取，不让 B 重新生成问题。原始输出仍完整保留。已有问题按规范化的问题文本去重，不重开已经回答的同一问题；语义不同的改写是否重复仍依赖模型判断和用户审阅。
 
@@ -54,7 +57,7 @@ every call receives explicit stage inputs, without earlier conversation history.
 
 候选整理后，以当前业务理解和实际候选开展独立业务表达检查：优先选择最能区分模型边界的代表性事实，检查能否区分有业务差别的情形。只有已有明确依据的模型缺陷才自动进行一轮局部修正，然后复查原有用例。业务歧义保留，不能自动回答。修正破坏原先可表达的事实时恢复初始候选，所有尝试保留。该检查位于模型构造内部；最终模型自述和过程支撑评估仍然只接收候选模型。
 
-`/api/analyze/stream` 返回 SSE，model 请求体使用 `{ stage: 'model', narrative, model?, instruction?, provider }`，无需 document 或完整 understanding。`/api/analyze` 采用相同输入及完整第二阶段实现，返回非流式结果。结果包含 `expressionReview`（初始及修正快照、检查用例、修改原因、状态）；流式 `model-checkpoint` 在后续推理前保存有效候选。缺少 narrative 会拒绝建模。
+`/api/analyze/stream` 返回 SSE，model 请求体使用 `{ stage: 'model', narrative, model?, instruction?, provider }`，无需 document 或完整 understanding。事实、故事和最终映射通过版本化的 `semantic-plan` 事件逐步发布；前端每次收到后立即写入项目状态，因此取消或 B 失败仍能保留已经完成的语义草稿。`/api/analyze` 采用相同输入及完整第二阶段实现，返回非流式结果。结果包含 `semantic`、`expressionReview`（初始及修正快照、检查用例、修改原因、状态）；流式 `model-checkpoint` 在后续推理前保存有效候选。缺少 narrative 会拒绝建模。
 
 业务理解完成后等待用户审阅。保存问题答案后，建模和讨论使用修订后的业务理解；建模需要把已确认的条件、分支和过程复用落实到候选模型的规则、业务过程和要求中。答案草稿不影响已保存正文，存在未保存修改时需先保存再建模或检验。候选模型页在“建模说明”和“模型视图”间切换，完整展示对象关系、操作、只读能力和规则，详情按选中元素关联。生成后由用户启动模型检验，支持仅重做自述或业务过程支撑。
 
@@ -64,7 +67,7 @@ every call receives explicit stage inputs, without earlier conversation history.
 
 评估输出 `clarifications` 替代独立的问题清单。普通模型缺口直接提出修改建议；确实缺少业务事实时，澄清须包含模型中的依据、歧义、影响和回答选项，依据只能来自候选模型，也统一进入业务理解表单。新增未决问题不等于业务事实变化，候选模型仍可审阅；保存答案修订业务理解后，旧模型及其评估才标记需要更新。未回答的问题和建模边界不会由程序补造答案。
 
-各次调用均可停止；B 失败时保留说明和旧模型，发送 `{ stage: 'compile', semanticPlan, narrative, provider }` 单独重试，无须重跑 A。B 仍只接收建模说明，narrative 用于后续检查。只有严格结构校验通过才更新图，不静默删除错误引用。候选页用“业务表达检查”展示检查与修正结果；本轮通过不代表已证明全部业务覆盖。检查超时或停止时，已完成候选仍可查看。页面不提供原始输出记录区域，业务理解、建模说明和模型自述继续在各自正文中流式显示；原始输出完整保留在本地草稿中用于诊断。运行进度、耗时及停止按钮在主区域可见，建模助手可收起并保留各阶段对话。
+各次调用均可停止；B 失败时保留说明、语义草稿和旧模型，发送 `{ stage: 'compile', semanticPlan, narrative, semantic, provider }` 单独重试，无须重跑事实、故事或 A。B 的模型调用接收建模说明及已校验语义计划，narrative 只用于请求边界校验和后续业务表达检查。只有严格结构校验通过才更新图，不静默删除错误引用。候选页用“语义依据”展示故事、原句和映射，用“业务表达检查”展示检查与修正结果；本轮通过不代表已证明全部业务覆盖。检查超时或停止时，已完成候选仍可查看。页面不提供原始输出记录区域，业务理解、建模说明和模型自述继续在各自正文中流式显示；原始输出完整保留在本地草稿中用于诊断。运行进度、耗时及停止按钮在主区域可见，建模助手可收起并保留各阶段对话。
 
 Pi loop 使用 `UOM_PI_TIMEOUT_MS` 限制单个阶段的总时长（默认 300 秒），并与用户取消信号合并；达到轮数上限或超时不会伪造通过结果。
 
@@ -92,7 +95,7 @@ npx tsx scripts/compare-reasoning.ts --input /path/to/document.json --output /pa
 
 提供方通过 `timing` 事件报告实际配置、输入/输出字符数、ACP 连接（或 HTTP 响应头）、会话建立、首段正文和完成/失败/取消时间。时间从各次调用开始累计，使用单调时钟；首段正文不包含推理片段，字符数不等于 token 数。前端“调用耗时”保留这些记录，多步骤分别列出。首段正文之前的等待包含服务、网络和推理，不能由客户端计时进一步拆分。浏览器断开后只能保留最近已收到的时间记录。
 
-单独验证第二阶段：准备外部 JSON 文件 `{ "narrative": "完整业务说明", "feedback": "可选反馈" }`，执行 `npx tsx scripts/run-modeling.ts --input /path/to/input.json --provider gpt`，环境中需提供对应的 API 配置。从 B 重试使用 `--semantic-plan /path/to/saved-plan.md --narrative /path/to/understanding.md` 替代 `--input`，之后同样开展表达检查。脚本在临时目录按调用序号和阶段保留实际输入、完整提示词、原始输出、事件及耗时，包括失败记录。没有缺陷时共三次调用，有需修正缺陷时最多五次，不保证总耗时比旧 A/B 更短。
+单独验证第二阶段：准备外部 JSON 文件 `{ "narrative": "完整业务说明", "feedback": "可选反馈" }`，执行 `npx tsx scripts/run-modeling.ts --input /path/to/input.json --provider gpt`，环境中需提供对应的 API 配置。从 B 重试使用 `--semantic-plan /path/to/saved-plan.md --semantic /path/to/semantic.json --narrative /path/to/understanding.md` 替代 `--input`；`--semantic` 可省略，但省略后只能重试编译与表达检查，不能恢复事实映射。脚本在临时目录按调用序号和阶段保留实际输入、完整提示词、原始输出、事件及耗时，包括失败记录。基础链路包含事实、故事、A、B、表达检查和映射调用；发现缺陷时还会增加修正与复查调用。
 
 开发验证：`npm test`、`npm run typecheck`、`npm run build`。`typecheck` 分别使用 `tsconfig.json` 检查后端、脚本及测试，使用 `tsconfig.app.json` 检查全部 Forge 前端 TS/TSX 和共享类型；两者都启用 strict，不启用 allowJs。前后端共用业务数据、流式事件以及按阶段区分的请求/结果类型。QQDocEditor 沿用子模块提供的 TypeScript 组件类型，不另建宽泛声明。测试覆盖阶段输入隔离、B 单独重试、SSE 分片与断开、两种提供方的取消和失败路径、模型及评估引用、前端版本依赖和草稿恢复。运行环境需满足 Vite 8 的 Node.js 要求；脚本和测试用 tsx 执行 TypeScript。
 
@@ -128,7 +131,7 @@ also default to DeepSeek. Set `UOM_LLM_PROVIDER=deepseek`, `gpt` or `qwen` to ov
 the provider default; the server uses Pi when a request selects it or when
 `UOM_AGENT_RUNTIME=pi` is set.
 an explicit request or `--provider` choice takes precedence.
-Credentials are loaded from the parent UOM `.env` and remain server-side.
+Credentials are loaded from the project root `.env` and remain server-side.
 API URLs accept either a base URL ending in `/v1` or the full `/chat/completions` endpoint.
 All DeepSeek calls explicitly disable thinking with `thinking: { type: "disabled" }`
 while retaining streaming output and the configured `LLM_MODEL`.

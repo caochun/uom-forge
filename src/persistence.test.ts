@@ -194,6 +194,88 @@ test('restoring an existing draft preserves the document, edits, answers, feedba
   assert.equal(restored.timings.understand?.[1].connectedMs, 60)
   assert.deepEqual(restored.messages[0].context, stored.messages[0].context)
 })
+
+test('restoring a valid semantic plan preserves its fact, story and mapping chain', () => {
+  const semantic = {
+    schemaVersion: '2',
+    status: 'mapped',
+    facts: [
+      {
+        id: 'fact-1',
+        statement: '客户提交订单',
+        kind: 'event',
+        actors: ['客户'],
+        objects: ['订单'],
+        conditions: [],
+        source: '客户提交订单',
+        certainty: 'explicit',
+      },
+    ],
+    stories: [
+      {
+        id: 'story-1',
+        name: '下单',
+        goal: '提交订单',
+        factIds: ['fact-1'],
+        steps: [
+          { order: 1, actor: '客户', action: '提交', object: '订单', factIds: ['fact-1'] },
+        ],
+      },
+    ],
+    mappings: [
+      {
+        factId: 'fact-1',
+        elementIds: ['submit-order'],
+        mappingType: 'action',
+        explanation: '提交动作表达该事实',
+        coverage: 'full',
+      },
+    ],
+    boundaries: [],
+    clarifications: [],
+  }
+  const restored = restoreProject(
+    { ...empty, plan: { plan: '说明', complete: true, compiled: false, semantic } },
+    empty,
+  )
+  assert.deepEqual(restored.plan?.semantic, semantic)
+})
+
+test('malformed semantic plans are dropped at the storage boundary', () => {
+  const restored = restoreProject(
+    {
+      ...empty,
+      plan: {
+        plan: '说明',
+        complete: true,
+        compiled: false,
+        semantic: { facts: 'invalid', stories: [], mappings: [], boundaries: [], clarifications: [] },
+      },
+    },
+    empty,
+  )
+  assert.equal(restored.plan?.semantic, undefined)
+})
+test('partial semantic snapshots survive a draft reload', () => {
+  const semantic = {
+    schemaVersion: '2',
+    status: 'facts',
+    facts: [
+      {
+        id: 'fact-1', statement: '客户提交订单', kind: 'event',
+        actors: ['客户'], objects: ['订单'], conditions: [],
+        source: '客户提交订单', certainty: 'explicit',
+      },
+    ],
+    stories: [], mappings: [], boundaries: [], clarifications: [],
+  }
+  const restored = restoreProject(
+    { ...empty, plan: { plan: '', complete: false, compiled: false, semantic } },
+    empty,
+  )
+  assert.equal(restored.plan?.semantic?.status, 'facts')
+  assert.equal(restored.plan?.semantic?.facts[0].source, '客户提交订单')
+})
 test('old layout drafts retain object/relation/capability semantics without creating an empty candidate', () => {
   const restored = restoreProject(
     {

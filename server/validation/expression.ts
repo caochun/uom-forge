@@ -71,6 +71,27 @@ export function parseExpressionCheck(
   if (model.boundaries.length) ids.add('boundaries')
   if (model.summary.trim()) ids.add('summary')
   if (isRecord(value)) {
+    const sourceBlocks = narrative
+      .split(/\r?\n/)
+      .map((text) => text.trim())
+      .filter(Boolean)
+      .map((text, index) => ({
+        id: `X${String(index + 1).padStart(4, '0')}`,
+        text,
+      }))
+    const sources = new Map(sourceBlocks.map((item) => [item.id, item.text]))
+    const resolveBasis = (item: Record<string, unknown>, label: string) => {
+      if (!Array.isArray(item.basisIds)) return
+      if (!item.basisIds.length ||
+          item.basisIds.some((id) => typeof id !== 'string' || !sources.has(id)))
+        throw new Error(`${label} 引用了未知业务说明片段。`)
+      const excerpts = [...new Set(item.basisIds as string[])]
+        .map((id) => sources.get(id)!)
+      item.basis = excerpts.length === 1
+        ? excerpts[0]
+        : excerpts.map((text) => `“${text}”`).join('；')
+      delete item.basisIds
+    }
     if (value.clarifications === undefined) value.clarifications = []
     if (previous && value.additionalCases === undefined)
       value.additionalCases = []
@@ -79,6 +100,8 @@ export function parseExpressionCheck(
       if (!Array.isArray(items)) continue
       for (const item of items) {
         if (!isRecord(item)) continue
+        if (key !== 'judgments')
+          resolveBasis(item, `检查用例 ${String(item.id || '')}`)
         if (Array.isArray(item.elements))
           item.elements = [
             ...new Set(
@@ -93,6 +116,9 @@ export function parseExpressionCheck(
           ]
       }
     }
+    if (Array.isArray(value.clarifications))
+      for (const [index, item] of value.clarifications.entries())
+        if (isRecord(item)) resolveBasis(item, `业务澄清 ${index + 1}`)
   }
   if (previous) {
     if (

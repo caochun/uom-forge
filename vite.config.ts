@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react'
 import path from 'node:path'
 import { createApiMiddleware } from './server/api.ts'
 
-const envDirectory = path.resolve(import.meta.dirname, '..')
+const envDirectory = path.resolve(import.meta.dirname)
 for (const [key, value] of Object.entries(
   loadEnv(
     process.env.NODE_ENV === 'production' ? 'production' : 'development',

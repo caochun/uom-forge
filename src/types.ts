@@ -10,10 +10,11 @@ import type {
 import type { CandidateModel, Element } from '../shared/model.ts'
 import type { Revisions } from './workspace.ts'
 import type { ExpressionReview } from '../shared/expression.ts'
+import type { SemanticPlanV2 } from '../shared/semantic.ts'
 
 export type AnalysisStage = AnalysisRequest['stage']
 export type WorkspacePage = 'document' | 'understanding' | 'model' | 'review'
-export type ModelViewMode = 'plan' | 'model'
+export type ModelViewMode = 'evidence' | 'decisions' | 'model' | 'coverage'
 export type ReviewViewMode = 'narration' | 'assessment'
 export const EDITABLE_COLLECTIONS = [
   'objects',
@@ -41,6 +42,7 @@ export interface WorkspaceDocument extends BusinessDocument {
 }
 export interface SemanticPlan {
   plan: string
+  semantic?: SemanticPlanV2
   complete: boolean
   compiled: boolean
   warnings?: string[]

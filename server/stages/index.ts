@@ -35,6 +35,7 @@ export async function runStage(
         request.narrative,
         runTurn,
         configured,
+        request.semantic,
       )
     case 'narrate':
       return narrateModel(request.model, runTurn, configured)

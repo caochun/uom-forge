@@ -88,6 +88,32 @@ const candidate = (): CandidateModel => ({
   boundaries: [],
 })
 
+function semanticFixture(prompt: string, source: string): string | undefined {
+  if (prompt.includes('业务事实提取器'))
+    return JSON.stringify({
+      facts: [{
+        id: 'fact-1', statement: '事项形成成果', kind: 'event',
+        actors: ['业务方'], objects: ['事项', '成果'], conditions: [],
+        result: '形成成果', source, certainty: 'explicit',
+      }],
+    })
+  if (prompt.includes('组织成业务故事'))
+    return JSON.stringify({
+      stories: [{
+        id: 'story-1', name: '办理事项', goal: '形成成果',
+        factIds: ['fact-1'],
+        steps: [{ order: 1, actor: '业务方', action: '办理', object: '事项', result: '形成成果', factIds: ['fact-1'] }],
+      }],
+    })
+  if (prompt.includes('映射到已经编译的候选领域模型元素'))
+    return JSON.stringify({
+      mappings: [{
+        factId: 'fact-1', elementIds: ['produces'], mappingType: 'relation',
+        explanation: '产出关系表达事项形成成果。', coverage: 'full',
+      }],
+    })
+}
+
 test('semantic turn and compiler have isolated inputs; stream and result preserve the plan', async () => {
   const events: StageEvent[] = []
   const prompts: string[] = []
@@ -121,7 +147,9 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
       prompts.push(prompt)
       assert.equal(options.provider, 'gpt')
       assert.doesNotMatch(prompt, /DOCUMENT_CANARY|SOURCE_CANARY|QUOTE_CANARY/)
-      if (prompts.length === 1) {
+      const fixture = semanticFixture(prompt, 'NARRATIVE_ONLY')
+      if (fixture) return fixture
+      if (prompt.includes('第二阶段 A')) {
         assert.match(prompt, /NARRATIVE_ONLY/)
         assert.match(prompt, /FEEDBACK_ONLY/)
         assert.doesNotMatch(prompt, /additionalProperties|schemaVersion/)
@@ -129,7 +157,7 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
         options.onEvent?.({ type: 'delta', text: semanticPlan })
         return semanticPlan
       }
-      if (prompts.length === 3) {
+      if (prompt.includes('第二阶段内部业务表达检查')) {
         assert.match(prompt, /NARRATIVE_ONLY/)
         assert.doesNotMatch(prompt, /FEEDBACK_ONLY|跟踪事项与成果/)
         return JSON.stringify({
@@ -156,16 +184,23 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
             event.type === 'model-plan' && event.semanticPlan === semanticPlan,
         ),
       )
-      assert.doesNotMatch(prompt, /NARRATIVE_ONLY|FEEDBACK_ONLY/)
+      assert.doesNotMatch(prompt, /FEEDBACK_ONLY/)
       assert.ok(prompt.includes(JSON.stringify(semanticPlan)))
+      assert.match(prompt, /fact-1|事项形成成果/)
       options.onEvent?.({ type: 'delta', text: JSON.stringify(candidate()) })
       return JSON.stringify(candidate())
     },
     { provider: 'gpt', onEvent: (event) => events.push(event) },
   )
-  assert.equal(prompts.length, 3)
+  assert.equal(prompts.length, 6)
+  assert.ok(
+    prompts.findIndex((prompt) => prompt.includes('映射到已经编译的候选领域模型元素')) >
+      prompts.findIndex((prompt) => prompt.includes('第二阶段内部业务表达检查')),
+  )
   assert.equal(result.expressionReview.status, 'passed')
   assert.equal(result.semanticPlan, semanticPlan)
+  assert.equal(result.semantic?.status, 'mapped')
+  assert.deepEqual(result.semantic?.mappings[0].elementIds, ['produces'])
   assert.deepEqual(result.model, candidate())
   assert.deepEqual(result.provenance, {
     basis: 'business-understanding',
@@ -174,6 +209,12 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
   assert.deepEqual(
     events.filter((event) => event.type === 'delta').map((event) => event.part),
     ['semantic', 'compile'],
+  )
+  assert.deepEqual(
+    events
+      .filter((event) => event.type === 'semantic-plan')
+      .map((event) => event.semantic.status),
+    ['facts', 'stories', 'mapped'],
   )
 })
 
@@ -253,8 +294,10 @@ test('cancellation between steps prevents compilation and retains the published 
   await assert.rejects(
     buildModel(
       { narrative: '业务说明' },
-      async () => {
+      async (prompt) => {
         calls++
+        const fixture = semanticFixture(prompt, '业务说明')
+        if (fixture) return fixture
         return semanticPlan
       },
       {
@@ -269,7 +312,7 @@ test('cancellation between steps prevents compilation and retains the published 
     ),
     { name: 'AbortError' },
   )
-  assert.equal(calls, 1)
+  assert.equal(calls, 3)
   assert.equal(saved, semanticPlan)
 })
 
@@ -281,8 +324,11 @@ test('compiler failure or cancellation preserves plan without publishing a model
     await assert.rejects(
       buildModel(
         { narrative: '业务说明' },
-        async () => {
-          if (++calls === 1) return semanticPlan
+        async (prompt) => {
+          calls++
+          const fixture = semanticFixture(prompt, '业务说明')
+          if (fixture) return fixture
+          if (prompt.includes('第二阶段 A')) return semanticPlan
           if (cancel) controller.abort()
           return 'not JSON'
         },
@@ -290,7 +336,7 @@ test('compiler failure or cancellation preserves plan without publishing a model
       ),
       cancel ? { name: 'AbortError' } : /模型整理失败，建模说明已保留/,
     )
-    assert.equal(calls, 2)
+    assert.equal(calls, 4)
     assert.equal(
       events.find((event) => event.type === 'model-plan')?.semanticPlan,
       semanticPlan,

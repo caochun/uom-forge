@@ -52,12 +52,38 @@ const uncertainCheck = (basis: string) =>
     clarifications: [],
   })
 
+function semanticFixture(prompt: string, source: string): string | undefined {
+  if (prompt.includes('业务事实提取器'))
+    return JSON.stringify({
+      facts: [{
+        id: 'fact-1', statement: source, kind: 'event', actors: ['业务方'],
+        objects: ['事项'], conditions: [], source, certainty: 'explicit',
+      }],
+    })
+  if (prompt.includes('组织成业务故事'))
+    return JSON.stringify({
+      stories: [{
+        id: 'story-1', name: '办理事项', goal: '完成事项', factIds: ['fact-1'],
+        steps: [{ order: 1, actor: '业务方', action: '办理', object: '事项', factIds: ['fact-1'] }],
+      }],
+    })
+  if (prompt.includes('映射到已经编译的候选领域模型元素'))
+    return JSON.stringify({
+      mappings: [{
+        factId: 'fact-1', elementIds: [], mappingType: 'object',
+        explanation: '当前候选保留该事实为边界，尚无对应元素。', coverage: 'missing',
+      }],
+    })
+}
+
 test('clarifications are review metadata with basis and impact, published before B and omitted from its input', async () => {
   let calls = 0
   const events: StageEvent[] = []
   const result = await buildModel(
     { narrative },
     async (prompt) => {
+      const fixture = semanticFixture(prompt, narrative)
+      if (fixture) return fixture
       if (++calls === 1) return plan
       if (calls === 3) return uncertainCheck(narrative)
       assert.ok(
@@ -67,7 +93,8 @@ test('clarifications are review metadata with basis and impact, published before
             event.clarifications[0]?.text === '一份处理记录可以归属几个事项？',
         ),
       )
-      assert.ok(prompt.endsWith(JSON.stringify(semantics)))
+      assert.ok(prompt.includes(JSON.stringify(semantics)))
+      assert.match(prompt, /fact-1/)
       assert.doesNotMatch(prompt, /一份处理记录可以归属几个事项|只归属一个事项/)
       return JSON.stringify(model)
     },
@@ -97,6 +124,8 @@ test('unsupported business questions cannot silently reach the user or compiler'
   const result = await buildModel(
     { narrative: '独立保存事项。' },
     async (prompt) => {
+      const fixture = semanticFixture(prompt, '独立保存事项。')
+      if (fixture) return fixture
       calls++
       if (calls === 1) return plan
       if (calls === 3) return uncertainCheck('独立保存事项。')
@@ -159,6 +188,8 @@ test('one invalid question cannot erase valid questions or the plan when B fails
     buildModel(
       { narrative },
       async (prompt) => {
+        const fixture = semanticFixture(prompt, narrative)
+        if (fixture) return fixture
         if (++calls === 1) return mixed
         assert.doesNotMatch(prompt, /其他记录是否共享|不存在的依据|需要审批吗/)
         return '{}'
@@ -183,7 +214,9 @@ test('duplicate questions are isolated and a questionnaire alone is not a model 
   assert.match(review.warnings[0], /重复/)
   let calls = 0
   await assert.rejects(
-    buildModel({ narrative }, async () => {
+    buildModel({ narrative }, async (prompt) => {
+      const fixture = semanticFixture(prompt, narrative)
+      if (fixture) return fixture
       calls++
       return section
     }),

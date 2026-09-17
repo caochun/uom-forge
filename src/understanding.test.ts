@@ -34,6 +34,26 @@ const source: Understanding = {
   ],
   warnings: [],
 }
+
+test('questions parse options written on the same numbered line', () => {
+  assert.deepEqual(
+    extractQuestions(
+      '## 待确认问题\n1. 区间边界归属哪一档？选项：A. 下含上不含；B. 上含下不含\n2. 需要哪些信息？多选：编号；地址',
+    ),
+    [
+      {
+        text: '区间边界归属哪一档？',
+        options: ['A. 下含上不含', 'B. 上含下不含'],
+      },
+      {
+        text: '需要哪些信息？',
+        options: ['编号', '地址'],
+        multiple: true,
+      },
+    ],
+  )
+})
+
 const project = (): Project => ({
   version: 4,
   document: { name: 'doc', content: 'text', blocks: [], size: '', updated: '' },

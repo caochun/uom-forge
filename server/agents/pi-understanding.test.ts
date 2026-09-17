@@ -6,8 +6,8 @@ test('independent coverage check treats omitted and partial blocks as gaps', asy
   const runTurn = async () =>
     JSON.stringify({
       coverage: [
-        { text: '事实一', status: 'complete', note: '已说明' },
-        { text: '事实二', status: 'partial', note: '遗漏条件' },
+        { id: 'block-1', status: 'complete', note: '已说明' },
+        { id: 'block-2', status: 'partial', note: '遗漏条件' },
       ],
     })
   const gaps = await independentlyCheck(
@@ -29,7 +29,7 @@ test('independent coverage check treats omitted and partial blocks as gaps', asy
 test('independent coverage check accepts only complete known blocks', async () => {
   const runTurn = async () =>
     JSON.stringify({
-      coverage: [{ text: '事实一', status: 'complete', note: '已说明' }],
+      coverage: [{ id: 'block-1', status: 'complete', note: '已说明' }],
     })
   const gaps = await independentlyCheck(
     '说明',
@@ -38,4 +38,32 @@ test('independent coverage check accepts only complete known blocks', async () =
     'gpt',
   )
   assert.deepEqual(gaps, [])
+})
+
+test('coverage check uses stable ids and ignores unknown critic entries', async () => {
+  const gaps = await independentlyCheck(
+    '说明',
+    [
+      { id: 'block-1', text: '相同原文' },
+      { id: 'block-2', text: '相同原文' },
+    ],
+    async (prompt) => {
+      assert.match(prompt, /必须原样返回每个输入 id/)
+      assert.match(prompt, /"id":"block-1"/)
+      return JSON.stringify({
+        coverage: [
+          { id: 'block-1', status: 'complete', note: '已说明' },
+          { id: 'unknown', status: 'complete', note: '无效记录' },
+        ],
+      })
+    },
+    'deepseek',
+  )
+  assert.deepEqual(gaps, [
+    {
+      text: '相同原文',
+      status: 'missing',
+      note: '独立评估未返回该原文片段。',
+    },
+  ])
 })

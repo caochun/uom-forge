@@ -30,7 +30,7 @@ const projectRoot = path.resolve(
   '..',
 )
 for (const [key, value] of Object.entries(
-  loadEnv('development', path.resolve(projectRoot, '..'), ''),
+  loadEnv('development', projectRoot, ''),
 )) {
   if (process.env[key] === undefined) process.env[key] = value
 }

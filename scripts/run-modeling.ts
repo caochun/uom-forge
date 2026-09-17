@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
+import { loadEnv } from 'vite'
 import { buildModel, compileModel } from '../server/stages/modeling.ts'
 import { runProviderTurn, resolveProvider } from '../server/providers/index.ts'
 import type { ModelingInput, ProviderEvent } from '../shared/analysis.ts'
@@ -9,12 +10,25 @@ import type { RunTurn } from '../server/providers/types.ts'
 import type { StageOptions } from '../server/stages/contracts.ts'
 import { isRecord } from '../server/validation/values.ts'
 import { requireText } from '../server/validation/document.ts'
+import { validateSemanticPlan } from '../server/validation/semantic.ts'
+
+const projectRoot = path.resolve(import.meta.dirname, '..')
+for (const [key, value] of Object.entries(
+  loadEnv(
+    process.env.NODE_ENV === 'production' ? 'production' : 'development',
+    projectRoot,
+    '',
+  ),
+)) {
+  if (process.env[key] === undefined) process.env[key] = value
+}
 
 // External fixtures only. Keep business examples out of product prompts/code.
 const { values } = parseArgs({
   options: {
     input: { type: 'string' },
     'semantic-plan': { type: 'string' },
+    semantic: { type: 'string' },
     narrative: { type: 'string' },
     provider: { type: 'string' },
   },
@@ -23,6 +37,8 @@ if (Boolean(values.input) === Boolean(values['semantic-plan']))
   throw new Error(
     'Specify --input input.json OR --semantic-plan plan.md [--provider deepseek|gpt|qwen]',
   )
+if (values.semantic && !values['semantic-plan'])
+  throw new Error('--semantic requires --semantic-plan.')
 const provider = resolveProvider(values.provider)
 const savedPlan = values['semantic-plan']
   ? await readFile(values['semantic-plan'], 'utf8')
@@ -32,6 +48,12 @@ const retryNarrative = values.narrative
   : ''
 if (savedPlan !== null)
   requireText(retryNarrative, '重试检查所需的业务说明（--narrative）')
+const retrySemantic = values.semantic
+  ? validateSemanticPlan(
+      JSON.parse(await readFile(values.semantic, 'utf8')),
+      retryNarrative,
+    )
+  : undefined
 let input: ModelingInput | null = null
 if (values.input) {
   const value: unknown = JSON.parse(await readFile(values.input, 'utf8'))
@@ -49,7 +71,11 @@ const output = await mkdtemp(path.join(tmpdir(), 'forge-modeling-'))
 await writeFile(
   path.join(output, 'input.json'),
   JSON.stringify(
-    input || { semanticPlan: savedPlan, narrative: retryNarrative },
+    input || {
+      semanticPlan: savedPlan,
+      narrative: retryNarrative,
+      ...(retrySemantic ? { semantic: retrySemantic } : {}),
+    },
     null,
     2,
   ),
@@ -102,7 +128,13 @@ try {
   const result =
     savedPlan === null
       ? await buildModel(input!, invoke, options)
-      : await compileModel(savedPlan, retryNarrative, invoke, options)
+      : await compileModel(
+          savedPlan,
+          retryNarrative,
+          invoke,
+          options,
+          retrySemantic,
+        )
   await writeFile(
     path.join(output, 'result.json'),
     JSON.stringify(result, null, 2),

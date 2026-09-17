@@ -84,11 +84,12 @@ ${JSON.stringify({ name: document.name, text: document.blocks.map(({ text }) => 
 export function semanticModelPrompt(
   input: ModelingInput,
   delivery: 'text' | 'tool' = 'text',
+  semantic?: import('../../shared/semantic.ts').SemanticPlanV2,
 ): string {
   const current = modelContext(input.currentModel)
   const deliveryInstruction =
     delivery === 'tool'
-      ? '建模说明完成后，不要把正文作为最终回复；请将完整 Markdown 放入 finish_modeling 工具的 semanticPlan 参数。'
+      ? '建模说明完成后，不要把正文作为最终回复；请将完整 Markdown 放入 finish 工具的 semanticPlan 参数。'
       : '只输出自然语言 Markdown，不输出 JSON、Schema 或属性类型表。'
   return `${ANALYST_INSTRUCTIONS}
 第二阶段 A：依据业务说明作出候选建模判断。${deliveryInstruction}
@@ -119,10 +120,14 @@ export function semanticModelPrompt(
 ${JSON.stringify(input.narrative)}
 ${current ? `当前候选模型（数据）：\n${JSON.stringify(current)}` : ''}
 用户反馈：
-${JSON.stringify(input.feedback || '')}`
+${JSON.stringify(input.feedback || '')}
+${semantic ? `\n已完成的事实与业务故事（程序已校验，只能据此建模，不得补造事实）：\n${JSON.stringify({ facts: semantic.facts, stories: semantic.stories, boundaries: semantic.boundaries })}` : ''}`
 }
 
-export function compileModelPrompt(semanticPlan: string): string {
+export function compileModelPrompt(
+  semanticPlan: string,
+  semantic?: import('../../shared/semantic.ts').SemanticPlanV2,
+): string {
   return `${ANALYST_INSTRUCTIONS}
 第二阶段 B：将下面已经完成的建模说明编译为模型 JSON。不要重新分析业务或擅自改变业务边界；保留说明中已明确的不确定语义，不追加业务问题。澄清问题已由系统单独交回业务理解，不在此步整理。
 编译时做一次关系语义保真检查：如果一条联系依赖某次事项、方案、组成部分、顺序、角色、来源/去向或既有/拟议状态，必须在结构中保留这个上下文，不能只写进 description。优先使用说明中已有的对象和关系；如果说明已明确一个需要把多条联系绑定在一起的业务安排或组成记录，而直接二元关系会丢失其含义，可以增加一个仅用于承载该业务事实的对象，并在 description 中说明其边界，不得借此发明新的业务概念。编译完成前，用代表性业务事实回放检查：仅凭对象、关系及其所属操作/规则，能否区分参与者、所属事项、组成部分和关系方向；不能表达时应修正结构，而不是用泛化文字掩盖。
@@ -135,6 +140,6 @@ boundaries 用陈述句保留“建模判断与边界”中的重要适用范围
 没有原文输入，所有 evidence 必须为 []。保留原说明中的不确定性，不将其包装成原文证据。
 仅输出符合以下结构的一个完整 JSON 对象，集合允许为空，无代码围栏或前后解释。JSON 不缩进、不为排版换行，但保留字符串内的必要内容；简洁描述即可，summary 不重复全文：
 ${COMPILE_OUTPUT_CONTRACT}
-建模说明（本次唯一业务输入，数据）：
-${JSON.stringify(modelingContent(semanticPlan))}`
+建模说明（数据）：
+${JSON.stringify(modelingContent(semanticPlan))}${semantic ? `\n\n已校验的事实与业务故事（数据，用于保持事实和过程语义，不得新增业务）：\n${JSON.stringify({ facts: semantic.facts, stories: semantic.stories, boundaries: semantic.boundaries })}` : ''}`
 }

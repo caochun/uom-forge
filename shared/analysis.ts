@@ -1,5 +1,6 @@
 import type { CandidateModel, Evidence } from './model.ts'
 import type { ExpressionReview } from './expression.ts'
+import type { SemanticPlanV2 } from './semantic.ts'
 
 export interface BusinessDocument {
   name: string
@@ -69,6 +70,7 @@ export interface ModelingInput {
 }
 export interface ModelingResult {
   semanticPlan: string
+  semantic?: SemanticPlanV2
   clarifications: BusinessClarification[]
   model: CandidateModel
   expressionReview: ExpressionReview
@@ -123,11 +125,17 @@ export type StageEvent =
       clarifications: BusinessClarification[]
       warnings: string[]
     }
+  | { type: 'semantic-plan'; part: 'semantic'; semantic: SemanticPlanV2 }
   | ({ type: 'understanding-narrative' } & Understanding)
 export type AnalysisRequest = { provider: ProviderId; runtime?: AgentRuntimeId } & (
   | { stage: 'understand'; document: BusinessDocument }
   | { stage: 'model'; narrative: string; model?: unknown; instruction?: string }
-  | { stage: 'compile'; semanticPlan: string; narrative: string }
+  | {
+      stage: 'compile'
+      semanticPlan: string
+      narrative: string
+      semantic?: SemanticPlanV2
+    }
   | { stage: 'narrate'; model: CandidateModel }
   | { stage: 'assess'; model: CandidateModel }
 )

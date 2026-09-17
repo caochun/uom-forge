@@ -24,7 +24,12 @@ const checkSchema = Type.Object({
 type CheckArgs = { narrative: string }
 
 type CriticResult = {
-  coverage?: { text?: unknown; status?: unknown; note?: unknown }[]
+  coverage?: {
+    id?: unknown
+    text?: unknown
+    status?: unknown
+    note?: unknown
+  }[]
 }
 
 function parseJsonObject(text: string): CriticResult {
@@ -45,36 +50,62 @@ export async function independentlyCheck(
   signal?: AbortSignal,
 ): Promise<{ text: string; status: string; note: string }[]> {
   const prompt = `你是独立的业务说明覆盖评估员。只判断业务说明是否表达了原文片段中的业务事实，不评价文风，也不补写业务。
-对每个原文片段返回 complete、partial 或 uncovered：complete 表示业务说明明确表达了该片段的主要事实及限制；partial 表示只表达了一部分；uncovered 表示没有表达。不要因为语义相近就忽略关键条件、数字、例外或主体。只输出 JSON：{"coverage":[{"text":"原文片段原文","status":"complete|partial|uncovered","note":"简短说明"}]}。不要输出段落编号、块 ID 或位置标识。
+对每个原文片段返回 complete、partial 或 uncovered：complete 表示业务说明明确表达了该片段的主要事实及限制；partial 表示只表达了一部分；uncovered 表示没有表达。不要因为语义相近就忽略关键条件、数字、例外或主体。必须原样返回每个输入 id，不要回抄原文。只输出 JSON：{"coverage":[{"id":"输入片段 id","status":"complete|partial|uncovered","note":"简短说明"}]}。
 
 业务说明：
 ${narrative}
 
-原文片段：
-${sourceBlocks.map((block) => block.text).join('\n')}`
+原文片段（JSON 数据）：
+${JSON.stringify(sourceBlocks)}`
   const raw = await runTurn(prompt, { provider, signal, outputFormat: 'json' })
   const result = parseJsonObject(raw)
   const remaining = [...(result.coverage || [])]
-  const byText = new Map<string, { status: string; note: string }>()
+  const byId = new Map<string, { status: string; note: string }>()
   const normalize = (value: string) => value.replace(/\s+/g, '')
   for (const block of sourceBlocks) {
     const index = remaining.findIndex((item) => {
+      if (String(item.id || '') === block.id) return true
+      // Accept legacy critic output during a rolling deployment.
       const returned = normalize(String(item.text || ''))
       const source = normalize(block.text)
       return returned === source || (returned.length >= 12 && source.includes(returned))
     })
     if (index >= 0) {
       const item = remaining.splice(index, 1)[0]
-      byText.set(block.text, { status: String(item.status || 'uncovered'), note: String(item.note || '') })
+      byId.set(block.id, {
+        status: String(item.status || 'uncovered'),
+        note: String(item.note || ''),
+      })
     }
   }
   return sourceBlocks
-    .filter((block) => byText.get(block.text)?.status !== 'complete')
+    .filter((block) => byId.get(block.id)?.status !== 'complete')
     .map((block) => ({
       text: block.text,
-      status: byText.get(block.text)?.status || 'missing',
-      note: byText.get(block.text)?.note || '独立评估未返回该原文片段。',
+      status: byId.get(block.id)?.status || 'missing',
+      note: byId.get(block.id)?.note || '独立评估未返回该原文片段。',
     }))
+}
+
+function gapFeedback(
+  incomplete: { text: string; status: string; note: string }[],
+  reviewOnly: boolean,
+): string {
+  if (!incomplete.length) return '所有原文片段均已判断为完整覆盖。请调用 finish_understanding 提交刚才检查的完整文本。'
+  const shown = incomplete.slice(0, 12)
+  const lines = shown.map(
+    (item, index) =>
+      `${index + 1}. [${item.status}] ${item.text}${item.note ? `\n   原因：${item.note}` : ''}`,
+  )
+  const omitted = incomplete.length - shown.length
+  return [
+    `发现 ${incomplete.length} 个原文片段未完整覆盖。`,
+    ...lines,
+    ...(omitted > 0 ? [`另有 ${omitted} 个片段未在本次反馈中展开。`] : []),
+    reviewOnly
+      ? '已完成两次独立检查。请保留仍无法可靠整合的内容作为待复核边界，并立即调用 finish_understanding 提交刚才检查的完整文本。'
+      : '请针对上述原文补充业务理解，然后再检查一次。',
+  ].join('\n')
 }
 
 function modelFor(provider: ProviderId, env: NodeJS.ProcessEnv): Model<'openai-completions'> {
@@ -118,7 +149,6 @@ export async function runPiUnderstanding(
   let checks = 0
   let turns = 0
   let deliveryRetryQueued = false
-  let lastAssistantText = ''
   let requireTool = false
   let coverageComplete = false
   let independentAttempts = 0
@@ -142,9 +172,6 @@ export async function runPiUnderstanding(
           details: { accepted: false },
         }
       }
-      if (checkedNarrative !== args.narrative) {
-        return { content: [{ type: 'text', text: '请先用当前文本调用 check_understanding。' }], isError: true, details: { accepted: false } }
-      }
       if (!coverageComplete && !reviewOnly) {
         return {
           content: [{ type: 'text', text: '覆盖检查仍有缺口，请先补齐原文内容。' }],
@@ -153,13 +180,16 @@ export async function runPiUnderstanding(
         }
       }
       if (reviewOnly) {
-        finished = args.narrative
-        return { content: [{ type: 'text', text: '已保留业务理解；独立评估缺口将作为待复核提示。' }], details: { accepted: true, reviewRequired: true, incomplete: lastIndependentGaps.slice(0, 24), omitted: Math.max(0, lastIndependentGaps.length - 24), independentAttempts }, terminate: true }
+        finished = checkedNarrative
+        return { content: [{ type: 'text', text: '已提交最后一次检查的业务理解；独立评估缺口保留为待复核提示。' }], details: { accepted: true, reviewRequired: true, ignoredUncheckedRevision: args.narrative !== checkedNarrative, incomplete: lastIndependentGaps.slice(0, 24), omitted: Math.max(0, lastIndependentGaps.length - 24), independentAttempts }, terminate: true }
       }
-      finished = args.narrative
+      finished = checkedNarrative
       return {
         content: [{ type: 'text', text: '业务理解已提交。' }],
-        details: { narrative: args.narrative },
+        details: {
+          narrative: checkedNarrative,
+          ignoredUncheckedRevision: args.narrative !== checkedNarrative,
+        },
         terminate: true,
       }
     },
@@ -170,6 +200,17 @@ export async function runPiUnderstanding(
     description: '提交当前业务理解，由独立评估器逐个检查原文覆盖情况，并返回需要补充的原文片段。',
     parameters: checkSchema,
     execute: async (_id, args: CheckArgs) => {
+      if (independentAttempts >= 2) {
+        return {
+          content: [{ type: 'text', text: '已达到两次独立检查上限。不要继续检查或改写，请立即调用 finish_understanding；系统将提交最后一次检查的完整文本。' }],
+          details: {
+            incomplete: lastIndependentGaps.slice(0, 24),
+            omitted: Math.max(0, lastIndependentGaps.length - 24),
+            check: checks,
+            submitNow: true,
+          },
+        }
+      }
       checks += 1
       checkedNarrative = args.narrative
       independentAttempts += 1
@@ -181,9 +222,7 @@ export async function runPiUnderstanding(
       return {
         content: [{
           type: 'text',
-          text: coverageComplete
-            ? '所有原文片段均已判断为完整覆盖。'
-            : `发现 ${incomplete.length} 个原文片段未完整覆盖，请根据返回的原文补充业务理解。`,
+          text: gapFeedback(incomplete, reviewOnly),
         }],
         details: {
           incomplete: incomplete.slice(0, 24),
@@ -194,7 +233,7 @@ export async function runPiUnderstanding(
     },
   }
   const systemPrompt = `你是业务分析 Agent。你的任务是理解业务文档，不设计对象关系模型。
-先形成完整业务理解，调用 check_understanding 提交当前完整文本，由独立评估器逐个检查原文覆盖度；根据工具返回的原文缺口增量修正，再次检查，最后调用 finish_understanding。
+先形成完整业务理解，调用 check_understanding 提交当前完整文本，由独立评估器逐个检查原文覆盖度；根据工具返回的原文缺口增量修正。最多检查两次：第二次检查后即使仍有待复核片段，也要保留边界并立即调用 finish_understanding 提交最后一次检查的完整文本，不要继续反复压缩或扩写。
 最终文本必须使用以下 Markdown 二级标题，并按每节要求组织内容：
 ${UNDERSTANDING_SECTION_INSTRUCTIONS}
 
@@ -240,9 +279,6 @@ ${UNDERSTANDING_SECTION_INSTRUCTIONS}
       const delta = textFromEvent(event.assistantMessageEvent)
       if (delta) emitDelta(options, delta)
     }
-    if (event.type === 'message_end' && event.message.role === 'assistant') {
-      lastAssistantText = event.message.content.filter((block) => block.type === 'text').map((block) => block.text).join('')
-    }
     if (event.type === 'tool_execution_start') requireTool = false
     if (event.type === 'turn_end' && event.message.role === 'assistant' && event.toolResults.length === 0 && !finished && !deliveryRetryQueued) {
       deliveryRetryQueued = true
@@ -262,7 +298,13 @@ ${UNDERSTANDING_SECTION_INSTRUCTIONS}
     deadline.dispose()
   }
   deadline.signal.throwIfAborted()
-  if (!finished?.trim() && deliveryRetryQueued && checks > 0 && (coverageComplete || reviewOnly) && SECTION_NAMES.every((section) => lastAssistantText.includes(section))) finished = lastAssistantText
+  if (
+    !finished?.trim() &&
+    checks > 0 &&
+    (coverageComplete || reviewOnly) &&
+    SECTION_NAMES.every((section) => checkedNarrative.includes(section))
+  )
+    finished = checkedNarrative
   if (!finished?.trim()) throw new Error('Pi Agent 未通过提交工具交接业务理解。')
   return finished
 }

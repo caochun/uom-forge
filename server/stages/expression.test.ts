@@ -415,6 +415,21 @@ test('formatting normalization preserves meaning, while unknown names and unsupp
   )
 })
 
+test('expression checks resolve stable source ids to exact business text', () => {
+  const raw = JSON.parse(rawCheck(check))
+  delete raw.cases[0].basis
+  raw.cases[0].basisIds = ['X0001']
+  const result = parseExpressionCheck(JSON.stringify(raw), narrative, model)
+  assert.equal(result.cases[0].basis, narrative)
+  assert.throws(
+    () => {
+      raw.cases[0].basisIds = ['X9999']
+      parseExpressionCheck(JSON.stringify(raw), narrative, model)
+    },
+    /未知业务说明片段/,
+  )
+})
+
 test('repair can omit fixed empty metadata but cannot omit semantic fields or invent source evidence', () => {
   const { evidence: _evidence, properties: _properties, ...semantic } = relation
   const raw = { changes: [{ ...repair.changes[0], value: semantic }] }

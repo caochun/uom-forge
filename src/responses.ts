@@ -5,9 +5,10 @@ import type {
 } from '../shared/analysis.ts'
 import type { AnalysisStage } from './types.ts'
 import { isRecord } from './values.ts'
+import { validateSemanticPlan } from '../shared/semantic-validation.ts'
 
-// The server validates business payloads. This boundary checks the SSE envelope;
-// an assertion here does not replace the server's model/schema validation.
+// The server validates business payloads. This boundary checks the SSE envelope
+// and revalidates the persisted semantic handoff before it reaches UI state.
 export function parseAnalysisEvent(value: unknown): AnalysisEvent {
   if (!isRecord(value)) throw new Error('分析服务返回了无效事件')
   switch (value.type) {
@@ -29,6 +30,14 @@ export function parseAnalysisEvent(value: unknown): AnalysisEvent {
         Array.isArray(value.clarifications)
       )
         return value as AnalysisEvent
+      break
+    case 'semantic-plan':
+      if (value.part === 'semantic' && isRecord(value.semantic))
+        return {
+          type: 'semantic-plan',
+          part: 'semantic',
+          semantic: validateSemanticPlan(value.semantic),
+        }
       break
     case 'model-checkpoint':
       if (

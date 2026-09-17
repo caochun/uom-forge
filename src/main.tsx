@@ -134,6 +134,7 @@ function App() {
   const [comparison, setComparison] = useState(false)
   const [readingText, setReadingText] = useState('')
   const [narratingText, setNarratingText] = useState('')
+  const [modelActivity, setModelActivity] = useState<string[]>([])
   const [job, setJob] = useState<StageJob | null>(null)
   const [busy, setBusy] = useState(false)
   const [elapsed, setElapsed] = useState(0)
@@ -292,6 +293,14 @@ function App() {
     const started = Date.now()
     const basis = projectRef.current.revisions.business
     const modelRevision = projectRef.current.revisions.model + 1
+    const tracksModeling = stage === 'model' || stage === 'compile'
+    const addModelActivity = (text: string) => {
+      if (!tracksModeling || !text.trim()) return
+      setModelActivity((current) =>
+        current.at(-1) === text ? current : [...current, text].slice(-8),
+      )
+    }
+    if (tracksModeling) setModelActivity([`${STAGES[stage]}已开始。`])
     setJob({
       stage,
       started,
@@ -312,7 +321,7 @@ function App() {
     if (stage === 'assess') setReviewMode('assessment')
     if (stage === 'understand') setReadingText('')
     if (stage === 'model') {
-      setModelMode('plan')
+      setModelMode('evidence')
       setProject((current) => ({
         ...current,
         plan: { plan: '', complete: false, compiled: false },
@@ -340,7 +349,10 @@ function App() {
       body: JSON.stringify({ ...body, stage, provider, runtime }),
       signal: controller.signal,
     })
-    if (!response.ok) throw new Error('分析服务返回 HTTP ' + response.status)
+    if (!response.ok) {
+      addModelActivity(`任务中断：分析服务返回 HTTP ${response.status}`)
+      throw new Error('分析服务返回 HTTP ' + response.status)
+    }
     const received: { result?: AnalysisResult } = {}
     let output = ''
     let part: import('../shared/analysis.ts').StagePart | '' = ''
@@ -367,7 +379,8 @@ function App() {
           }
         })
       }
-      if (event.type === 'phase')
+      if (event.type === 'phase') {
+        addModelActivity(event.text)
         setJob((current) =>
           current
             ? {
@@ -377,6 +390,7 @@ function App() {
               }
             : current,
         )
+      }
       if (event.type === 'delta') {
         if (
           event.part &&
@@ -408,7 +422,8 @@ function App() {
             }))
         }
       }
-      if (event.type === 'model-plan')
+      if (event.type === 'model-plan') {
+        addModelActivity('建模决策已形成，正在编译候选模型。')
         setProject((current) =>
           receiveClarifications(
             {
@@ -418,6 +433,9 @@ function App() {
                 complete: true,
                 compiled: false,
                 warnings: event.warnings,
+                ...(current.plan?.semantic
+                  ? { semantic: current.plan.semantic }
+                  : {}),
               },
               revisions: { ...current.revisions, planBasis: basis },
             },
@@ -425,8 +443,40 @@ function App() {
             'model',
           ),
         )
+      }
+      if (event.type === 'semantic-plan') {
+        const semantic = event.semantic
+        addModelActivity(
+          semantic.status === 'facts'
+            ? `已提取 ${semantic.facts.length} 项业务事实。`
+            : semantic.status === 'stories'
+              ? `已组织 ${semantic.stories.length} 个业务故事。`
+              : `已完成 ${semantic.facts.length} 项事实的模型覆盖映射。`,
+        )
+        setProject((current) =>
+          receiveClarifications(
+            {
+              ...current,
+              plan: current.plan
+                ? { ...current.plan, semantic: event.semantic }
+                : {
+                    plan: '',
+                    complete: false,
+                    compiled: false,
+                    semantic: event.semantic,
+                  },
+            },
+            event.semantic.clarifications,
+            'model',
+          ),
+        )
+      }
       if (event.type === 'model-checkpoint') {
-        setModelMode('model')
+        const elementCount =
+          event.model.objects.length + event.model.relations.length +
+          event.model.actions.length + event.model.functions.length +
+          event.model.rules.length + event.model.activities.length
+        addModelActivity(`候选模型已生成，共 ${elementCount} 个模型元素。`)
         setProject((current) => ({
           ...current,
           candidate: {
@@ -445,11 +495,20 @@ function App() {
           },
         }))
       }
-      if (event.type === 'error') throw new Error(event.error || '分析失败')
-      if (event.type === 'result') received.result = event.result
+      if (event.type === 'error') {
+        addModelActivity(`任务中断：${event.error || '分析失败'}`)
+        throw new Error(event.error || '分析失败')
+      }
+      if (event.type === 'result') {
+        received.result = event.result
+        addModelActivity('建模流程已完成。')
+      }
     })
     const result = received.result
-    if (!result) throw new Error('本阶段未返回完整结果')
+    if (!result) {
+      addModelActivity('任务中断：本阶段未返回完整结果')
+      throw new Error('本阶段未返回完整结果')
+    }
     if (!isStageResult(stage, result))
       throw new Error('服务返回的结果与当前阶段不匹配')
     setProject((current) => ({
@@ -464,6 +523,12 @@ function App() {
   }
   const stop = () => {
     cancelled.current = true
+    if (job?.stage === 'model' || job?.stage === 'compile')
+      setModelActivity((current) =>
+        current.at(-1) === '任务已停止。'
+          ? current
+          : [...current, '任务已停止。'].slice(-8),
+      )
     abortRef.current?.abort()
   }
   const readBusiness = () =>
@@ -497,6 +562,7 @@ function App() {
           ? await runStage('compile', {
               semanticPlan: project.plan.plan,
               narrative: project.understanding?.narrative || '',
+              semantic: project.plan.semantic,
             })
           : await runStage('model', {
               narrative: project.understanding?.narrative || '',
@@ -531,6 +597,11 @@ function App() {
                   ...result.validation.warnings,
                 ]),
               ],
+              ...(result.semantic
+                ? { semantic: result.semantic }
+                : current.plan?.semantic
+                  ? { semantic: current.plan.semantic }
+                  : {}),
             },
             candidate: {
               model: result.model,
@@ -1136,8 +1207,12 @@ function App() {
                 onDiscuss={discussElement}
                 onEdit={editElement}
                 onAdd={addObject}
+                onRebuild={() => build()}
                 disabled={busy}
                 runningPart={runPart}
+                runningText={modelRunning ? job?.text : undefined}
+                activities={modelActivity}
+                running={modelRunning}
               />
             </>
           )}

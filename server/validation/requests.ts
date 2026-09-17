@@ -9,6 +9,8 @@ import type {
 import { validateDocument, requireText } from './document.ts'
 import { parseCandidateModel } from './model.ts'
 import { isRecord } from './values.ts'
+import type { SemanticPlanV2 } from '../../shared/semantic.ts'
+import { validateSemanticPlan } from './semantic.ts'
 
 export function parseAnalysisRequest(
   input: unknown,
@@ -46,12 +48,22 @@ export function parseAnalysisRequest(
     case 'compile':
       requireText(input.semanticPlan, '建模说明')
       requireText(input.narrative, '业务说明')
+      if (input.semantic !== undefined && !isRecord(input.semantic))
+        throw new Error('语义计划必须是对象。')
       return {
         provider,
         ...(runtime ? { runtime } : {}),
         stage: 'compile',
         semanticPlan: input.semanticPlan,
         narrative: input.narrative,
+        ...(isRecord(input.semantic)
+          ? {
+              semantic: validateSemanticPlan(
+                input.semantic as unknown as SemanticPlanV2,
+                input.narrative,
+              ),
+            }
+          : {}),
       }
     case 'narrate':
       return {

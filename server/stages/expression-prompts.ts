@@ -10,6 +10,14 @@ export function expressionPrompt(
   previous?: ExpressionCheck,
   formatError?: string,
 ): string {
+  const sourceBlocks = narrative
+    .split(/\r?\n/)
+    .map((text) => text.trim())
+    .filter(Boolean)
+    .map((text, index) => ({
+      id: `X${String(index + 1).padStart(4, '0')}`,
+      text,
+    }))
   return `${ANALYST_INSTRUCTIONS}
 第二阶段内部业务表达检查。你是独立检查者，只看当前业务说明与实际候选模型。先从业务说明找出重要的具体业务事实与条件，再尝试用候选模型表达，不能仅从模型已有名词挑选容易通过的检查。
 用简短的具体业务情形验证：能表达谁与谁在什么上下文发生什么；能区分有业务差别的两种情形；已知、拟议、临时计算与实际变更是否混淆；规则的适用对象、必要联系、条件、单位、公式与结果是否保留。关注同一容器内不同资源、同一主体多次事项、多方关系的共同上下文、当前与拟议状态、持久记录与临时输出等在本业务中确实适用的边界。不凭空添加业务。
@@ -21,18 +29,18 @@ status：expressed=能指出实际模型元素及其如何表达；defect=业务
 ${
   previous
     ? '只输出紧凑 JSON：{summary:string,judgments:[{id:string,status:"expressed"|"defect"|"uncertain",elements:string[],explanation:string,gap:string,suggestion:string}],additionalCases:[],clarifications:[]}。judgments 覆盖每一个已有用例，只返回判断，不复述原事实、依据和情形。需要新增用例时放入 additionalCases，其结构与首次 cases 相同。'
-    : '只输出紧凑 JSON：{summary:string,cases:[{id:string,fact:string,basis:string,scenario:string,status:"expressed"|"defect"|"uncertain",elements:string[],explanation:string,gap:string,suggestion:string}],clarifications:[]}'
+    : '只输出紧凑 JSON：{summary:string,cases:[{id:string,fact:string,basisIds:string[],scenario:string,status:"expressed"|"defect"|"uncertain",elements:string[],explanation:string,gap:string,suggestion:string}],clarifications:[]}'
 }
-每个 case 的 basis 必须直接摘录业务说明中的原文文字，至少一段；不要编造、改写或使用段落编号、块 ID 或位置标识。expressed 的 gap/suggestion 可为空。至少一个用例。
+每个新 case 必须使用 basisIds 引用至少一个业务说明片段 id，不要输出 basis，不要编造片段 id。expressed 的 gap/suggestion 可为空。至少一个用例。
 业务本身未明确与模型可以保存未知边界是两件事；业务未明确的用例仍为 uncertain，不能因模型写了“待确认”就改判 expressed。复查没有新的用户答案，不能宣告业务歧义已经解决。
-仅新发现实质业务歧义且不与业务说明的问题重复时，clarifications 可列 {text,basis:string,ambiguity,impact,options:string[],multiple:boolean}；basis 同样必须是业务说明中的原文文字，ambiguity 写有依据的不同解释，impact 写对本轮模型的影响，优先有限答案选项。通常保持 []。
+仅新发现实质业务歧义且不与业务说明的问题重复时，clarifications 可列 {text,basisIds:string[],ambiguity,impact,options:string[],multiple:boolean}；basisIds 同样引用业务说明片段，ambiguity 写有依据的不同解释，impact 写对本轮模型的影响，优先有限答案选项。通常保持 []。
 ${
   previous
     ? `这是修正后的复查。下面已有用例的事实、依据和情形由程序固定，逐个重新判断（包括原来可表达的用例），不能删除或弱化失败用例；必要时补充新用例以检查共同语义回归。不给出此前结论，依据当前模型重新判断。
 已有用例（数据）：${JSON.stringify(previous.cases.map(({ id, fact, basis, scenario }) => ({ id, fact, basis, scenario })))}`
     : ''
 }
-业务说明（数据）：${JSON.stringify(narrative)}
+业务说明片段（JSON 数据）：${JSON.stringify(sourceBlocks)}
 候选模型（数据）：${JSON.stringify(modelContext(model))}
 ${formatError ? `上一次检查输出未通过程序校验，请只修正输出格式后重新返回完整 JSON：${formatError}` : ''}`
 }

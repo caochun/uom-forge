@@ -29,6 +29,17 @@ test('frontend consumes typed SSE split inside UTF-8 and detects a mismatched st
   assert.equal(isStageResult('narrate', last.result), true)
   assert.equal(isStageResult('understand', last.result), false)
 })
+
+test('semantic plan events pass through the SSE boundary', () => {
+  const semantic = { schemaVersion: '2', status: 'facts', facts: [], stories: [], mappings: [], boundaries: [], clarifications: [] }
+  const event = parseAnalysisEvent({ type: 'semantic-plan', part: 'semantic', semantic })
+  assert.deepEqual(event, { type: 'semantic-plan', part: 'semantic', semantic })
+  assert.throws(() => parseAnalysisEvent({ type: 'semantic-plan', part: 'compile', semantic }), /无效事件/)
+  assert.throws(
+    () => parseAnalysisEvent({ type: 'semantic-plan', part: 'semantic', semantic: { ...semantic, facts: 'invalid' } }),
+    /语义计划结构无效/,
+  )
+})
 test('malformed transport envelopes and discussion failures are reported explicitly', () => {
   assert.throws(
     () => parseAnalysisEvent({ type: 'delta', text: 42 }),

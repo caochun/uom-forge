@@ -8,6 +8,8 @@ import type {
 } from '../types.ts'
 import { withoutQuestionSection } from '../../shared/questions.ts'
 import { answerText, sameAnswer } from '../understanding.ts'
+import { stripSourceMarkers } from '../../shared/understanding-sources.ts'
+import { SourceCatalogue } from './SourceReferences.tsx'
 
 interface Props {
   understanding: ReviewedUnderstanding | null
@@ -30,7 +32,8 @@ export default function BusinessUnderstanding({
   isSubmitting,
   isLive,
 }: Props) {
-  const narrative = stream.narrative || understanding?.narrative || ''
+  const narrative = stripSourceMarkers(stream.narrative || understanding?.narrative || '')
+    .replace(/\[\[source:[^\]\r\n]*$/, '')
   const questions =
     isLive || stream.narrative ? [] : understanding?.source.questions || []
   const confirmedAnswers = understanding?.confirmedAnswers || {}
@@ -78,6 +81,7 @@ export default function BusinessUnderstanding({
               这份说明是后续建模的业务依据。保存问题答案会更新正文；已确认语义需要进入候选模型，再由模型自述和业务过程支撑检验。
             </p>
           )}
+          {!isLive && !stream.narrative && understanding && <SourceCatalogue sources={understanding.sources} />}
         </article>
       )}
       {!narrative && !isLive && !understanding && (
@@ -88,7 +92,7 @@ export default function BusinessUnderstanding({
       {understanding && understanding.warnings.length > 0 && (
         <div className="panel-surface">
           <div className="narrative-body">
-            <p>业务说明章节检查</p>
+            <p>业务说明检查</p>
             <ul>
               {understanding.warnings.map((warning) => (
                 <li key={warning}>{warning}</li>

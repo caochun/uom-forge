@@ -6,6 +6,7 @@ import type { StageOptions } from '../stages/contracts.ts'
 import type { RunTurn } from '../providers/types.ts'
 import { piSignal } from './runtime.ts'
 import { requireModelProviderConfig } from '../providers/model-config.ts'
+import { SOURCE_INSTRUCTIONS, stripSourceMarkers } from '../../shared/understanding-sources.ts'
 import {
   UNDERSTANDING_SECTIONS,
   UNDERSTANDING_SECTION_INSTRUCTIONS,
@@ -53,7 +54,7 @@ export async function independentlyCheck(
 对每个原文片段返回 complete、partial 或 uncovered：complete 表示业务说明明确表达了该片段的主要事实及限制；partial 表示只表达了一部分；uncovered 表示没有表达。不要因为语义相近就忽略关键条件、数字、例外或主体。必须原样返回每个输入 id，不要回抄原文。只输出 JSON：{"coverage":[{"id":"输入片段 id","status":"complete|partial|uncovered","note":"简短说明"}]}。
 
 业务说明：
-${narrative}
+${stripSourceMarkers(narrative)}
 
 原文片段（JSON 数据）：
 ${JSON.stringify(sourceBlocks)}`
@@ -236,6 +237,7 @@ export async function runPiUnderstanding(
 先形成完整业务理解，调用 check_understanding 提交当前完整文本，由独立评估器逐个检查原文覆盖度；根据工具返回的原文缺口增量修正。最多检查两次：第二次检查后即使仍有待复核片段，也要保留边界并立即调用 finish_understanding 提交最后一次检查的完整文本，不要继续反复压缩或扩写。
 最终文本必须使用以下 Markdown 二级标题，并按每节要求组织内容：
 ${UNDERSTANDING_SECTION_INSTRUCTIONS}
+${SOURCE_INSTRUCTIONS}
 
 只记录文档明确内容、合理推断和待确认事项，三者必须区分；不要编造领域概念。业务过程用于说明业务如何展开，不等于模型对象；代表性业务事实用于后续检验，不是对象清单。
 只对影响业务目标、主体与事项、对象边界、关系、过程判断或约束含义，且无法由上下文合理解释的歧义提问。需要用户回答的问题放在“## 待确认问题”下，能有限列举的答案使用“选项：”或“多选：”。check_understanding 的 narrative 必须是当前完整文本，不要提交 block 覆盖清单。最终完成时必须调用 finish_understanding；不要把业务理解正文作为最终文本回复。`
@@ -288,7 +290,7 @@ ${UNDERSTANDING_SECTION_INSTRUCTIONS}
     }
   })
   options.onEvent?.({ type: 'phase', part: 'reading', text: 'Pi Agent 正在理解业务文档。' })
-  const source = document.blocks.map((block) => block.text).join('\n\n')
+  const source = JSON.stringify(document.blocks)
   const abort = () => agent.abort()
   deadline.signal.addEventListener('abort', abort, { once: true })
   try {

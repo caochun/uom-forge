@@ -223,22 +223,25 @@ export async function organizeStories(
         if (!step || typeof step !== 'object' || Array.isArray(step))
           throw new Error(`业务故事 ${storyId} 第 ${stepIndex + 1} 步格式无效。`)
         const value = step as Record<string, unknown>
+        const order = typeof value.order === 'number' ||
+          (typeof value.order === 'string' && value.order.trim())
+          ? Number(value.order) : NaN
+        if (!Number.isInteger(order) || order < 1)
+          throw new Error(`业务故事 ${storyId} 第 ${stepIndex + 1} 步的 order 必须是正整数。`)
         return {
-          order: Number(value.order),
+          order,
           actor: String(value.actor || '').trim(),
           action: String(value.action || '').trim(),
           object: String(value.object || '').trim(),
-          condition: value.condition == null ? undefined : String(value.condition),
-          result: value.result == null ? undefined : String(value.result),
-          factIds: stringArray(value.factIds, 'step.factIds'),
+          condition: value.condition == null ? undefined : String(value.condition).trim() || undefined,
+          result: value.result == null ? undefined : String(value.result).trim() || undefined,
+          factIds: cleanStringArray(value.factIds, `${storyId} 第 ${stepIndex + 1} 步的 factIds`),
         }
       })
       // Step order is a mechanical index. Models often number steps globally
       // across stories or skip values; sequence is the meaning, so renumber
       // after a stable sort and only reject genuinely ambiguous orderings.
       const orders = parsedSteps.map((step) => step.order)
-      if (orders.some((order) => !Number.isFinite(order)))
-        throw new Error(`业务故事 ${storyId} 存在缺少 order 的步骤。`)
       if (new Set(orders).size !== orders.length)
         throw new Error(`业务故事 ${storyId} 的步骤 order 有重复，无法确定先后顺序。`)
       const steps: BusinessStory['steps'] = [...parsedSteps]
@@ -246,7 +249,7 @@ export async function organizeStories(
         .map((step, index) => ({ ...step, order: index + 1 }))
       const declaredFactIds = value.factIds === undefined
         ? []
-        : stringArray(value.factIds, 'story.factIds')
+        : cleanStringArray(value.factIds, 'story.factIds')
       // The story-level list is a redundant index. Derive its complete value
       // from the steps so a valid step citation cannot be lost due to an LLM
       // omitting the same id from the parent object.
@@ -289,7 +292,11 @@ ${formatError ? `上次结果未通过程序校验：${formatError}\n请只修�
       { ...scopedTurn(options, 'semantic'), outputFormat: 'json' },
     )
     try {
-      return parseStories(raw)
+      const stories = parseStories(raw)
+      // Keep aggregate checks inside the retry boundary too (e.g. duplicate
+      // story ids). A successful parse must satisfy the published contract.
+      validateSemanticPlan({ schemaVersion: '2', status: 'stories', facts, stories, mappings: [], boundaries: [], clarifications: [] })
+      return stories
     } catch (error) {
       formatError = error instanceof Error ? error.message : String(error)
       if (attempt === 1) throw error
@@ -396,7 +403,9 @@ ${formatError ? `上次结果未通过程序校验：${formatError}\n请只修�
       { ...scopedTurn(options, 'semantic'), outputFormat: 'json' },
     )
     try {
-      return parseMappings(raw)
+      const mappings = parseMappings(raw)
+      validateSemanticPlan({ schemaVersion: '2', status: 'mapped', facts, stories, mappings, boundaries: [], clarifications: [] }, undefined, model)
+      return mappings
     } catch (error) {
       formatError = error instanceof Error ? error.message : String(error)
       if (attempt === 1) throw error

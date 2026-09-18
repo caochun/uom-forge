@@ -10,6 +10,7 @@ import {
   Network,
   PanelRightClose,
   PanelRightOpen,
+  RefreshCw,
   Save,
   Send,
   Square,
@@ -18,6 +19,9 @@ import { documentToBlocks, readSse } from './document.ts'
 import { advanceRevision, freshness, initialRevisions } from './workspace.ts'
 import { extractQuestions } from '../shared/questions.ts'
 import BusinessUnderstanding from './components/BusinessUnderstanding.tsx'
+import { reviseUnderstandingSources } from '../shared/understanding-sources.ts'
+import ModelingRun from './components/ModelingRun.tsx'
+import { modelingProgress, latestModelTimings, prepareCompilationRetry, type ModelRunStatus, type ProgressItem } from './modeling-progress.ts'
 import {
   CandidateView,
   DocumentView,
@@ -119,6 +123,9 @@ function App() {
   const [project, setProject] = useState(loadProject)
   const [view, setView] = useState<WorkspacePage>('document')
   const [modelMode, setModelMode] = useState<ModelViewMode>('evidence')
+  const [evidenceMode, setEvidenceMode] = useState<'facts' | 'stories'>('facts')
+  const [expressionFocus, setExpressionFocus] = useState(0)
+  const [modelRunStatus, setModelRunStatus] = useState<ModelRunStatus>()
   const [reviewMode, setReviewMode] = useState<ReviewViewMode>('narration')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [assistantOpen, setAssistantOpen] = useState(
@@ -237,6 +244,7 @@ function App() {
         : failure instanceof Error
           ? failure.message
           : String(failure)
+      setModelRunStatus((status) => status === 'running' ? stopped ? 'stopped' : 'failed' : status)
       if (!stopped) setError(message)
       addMessage({ role: 'assistant', content: message })
     } finally {
@@ -296,10 +304,13 @@ function App() {
     const addModelActivity = (text: string) => {
       if (!tracksModeling || !text.trim()) return
       setModelActivity((current) =>
-        current.at(-1) === text ? current : [...current, text].slice(-8),
+        current.at(-1) === text ? current : [...current, text].slice(-100),
       )
     }
-    if (tracksModeling) setModelActivity([`${STAGES[stage]}已开始。`])
+    if (tracksModeling) {
+      setModelActivity([`${STAGES[stage]}已开始。`])
+      setModelRunStatus('running')
+    }
     setJob({
       stage,
       started,
@@ -322,8 +333,21 @@ function App() {
     if (stage === 'model') {
       setProject((current) => ({
         ...current,
-        plan: { plan: '', complete: false, compiled: false },
+        plan: {
+          plan: '', complete: false, compiled: false,
+          basis: current.understanding ? {
+            narrative: current.understanding.narrative,
+            sources: current.understanding.sources,
+          } : undefined,
+        },
         outputs: { ...current.outputs, compile: '' },
+        timings: { ...current.timings, model: [], compile: [] },
+      }))
+    } else if (stage === 'compile') {
+      setProject((current) => ({
+        ...current,
+        plan: current.plan ? prepareCompilationRetry(current.plan) : null,
+        timings: { ...current.timings, model: [], compile: [] },
       }))
     }
     setProject((current) => ({
@@ -409,25 +433,24 @@ function App() {
           if (stage === 'narrate')
             setNarratingText((current) => current + (event.text || ''))
           if (stage === 'model' && event.part === 'semantic')
-            setProject((current) => ({
+            setProject((current) => current.plan?.semantic?.status === 'stories' && !current.plan.complete ? ({
               ...current,
               plan: {
-                complete: false,
-                compiled: false,
                 ...current.plan,
                 plan: (current.plan?.plan || '') + (event.text || ''),
               },
-            }))
+            }) : current)
         }
       }
       if (event.type === 'model-plan') {
-        addModelActivity('建模决策已形成，正在编译候选模型。')
+        addModelActivity('设计草案已生成，正在编译候选模型。')
         setProject((current) =>
           receiveClarifications(
             {
               ...current,
               plan: {
                 plan: event.semanticPlan,
+                basis: current.plan?.basis,
                 complete: true,
                 compiled: false,
                 warnings: event.warnings,
@@ -509,6 +532,7 @@ function App() {
     }
     if (!isStageResult(stage, result))
       throw new Error('服务返回的结果与当前阶段不匹配')
+    if (tracksModeling) setModelRunStatus('completed')
     setProject((current) => ({
       ...current,
       messages: current.messages.map((message) =>
@@ -525,7 +549,7 @@ function App() {
       setModelActivity((current) =>
         current.at(-1) === '任务已停止。'
           ? current
-          : [...current, '任务已停止。'].slice(-8),
+          : [...current, '任务已停止。'].slice(-100),
       )
     abortRef.current?.abort()
   }
@@ -587,14 +611,10 @@ function App() {
             ...current,
             plan: {
               plan: result.semanticPlan,
+              basis: current.plan?.basis,
               complete: true,
               compiled: true,
-              warnings: [
-                ...new Set([
-                  ...(retry ? current.plan?.warnings || [] : []),
-                  ...result.validation.warnings,
-                ]),
-              ],
+              warnings: [...new Set(result.validation.warnings)],
               ...(result.semantic
                 ? { semantic: result.semantic }
                 : current.plan?.semantic
@@ -826,12 +846,23 @@ function App() {
       : view === 'review'
         ? ['narrate', 'assess']
         : []
-  const modelTimingRecords = (['model', 'compile'] as const).flatMap((stage) =>
-    (project.timings?.[stage] || []).map((record) => ({
-      ...record,
-      label: record.part ? STAGE_PART_LABELS[record.part] : STAGES[stage],
-    })),
-  )
+  const modelTimingRecords = latestModelTimings(project.timings || {}).map((record) => ({
+    ...record,
+    label: record.part ? STAGE_PART_LABELS[record.part] : '建模',
+  }))
+  const progress = modelingProgress({
+    plan: project.plan,
+    candidate: project.candidate,
+    runningPart: runPart,
+    planStale: !modelRunning && stale.plan,
+    candidateStale: stale.candidate,
+  })
+  const viewModelStep = (step: ProgressItem) => {
+    setView('model')
+    setModelMode(step.tab)
+    if (step.tab === 'evidence') setEvidenceMode(step.id === 'stories' ? 'stories' : 'facts')
+    if (step.id === 'expression') setExpressionFocus((count) => count + 1)
+  }
   type TodoItem = {
     key: string
     text: string
@@ -879,7 +910,7 @@ function App() {
       text: stale.plan
         ? '建模依据已变化，这份说明不能直接重试整理，请重新建模。'
         : modelRunning
-          ? '建模说明已完成，正在整理候选模型。'
+          ? '设计草案已生成，正在整理候选模型。'
           : '建模说明已保留，候选模型尚未更新。',
       ...(canRetry && !busy
         ? { action: { label: '重新整理模型', run: () => build(true) } }
@@ -1050,6 +1081,11 @@ function App() {
                   {editing ? '取消修改' : '修正业务说明'}
                 </button>
               )}
+              {view === 'model' && (project.plan || model) && (
+                <button className="secondary-button" disabled={busy || !canModel} onClick={() => build()}>
+                  <RefreshCw size={14} />重新建模
+                </button>
+              )}
               <button
                 className="primary-button"
                 disabled={busy || primary.disabled}
@@ -1077,6 +1113,19 @@ function App() {
                 </span>
               ))}
             </div>
+          )}
+          {(modelRunning || (!job && view === 'model' && (project.plan || model || modelActivity.length > 0))) && (
+            <ModelingRun
+              progress={progress}
+              running={modelRunning}
+              text={modelRunning ? job.text : ''}
+              elapsed={elapsed}
+              status={modelRunStatus}
+              activities={modelActivity}
+              records={modelTimingRecords}
+              onStop={stop}
+              onView={viewModelStep}
+            />
           )}
           {job && !modelRunning && (
             <div className="run-status" role="status">
@@ -1155,6 +1204,11 @@ function App() {
                         narrative: editedNarrative,
                         questions: extractQuestions(editedNarrative),
                         warnings: [],
+                        sources: reviseUnderstandingSources(
+                          current.understanding?.sources,
+                          current.understanding?.narrative || '',
+                          editedNarrative,
+                        ),
                       }),
                       answers: {},
                       questionsSaved: false,
@@ -1223,14 +1277,13 @@ function App() {
                 onEdit={editElement}
                 onAdd={addObject}
                 onRebuild={() => build()}
+                canRebuild={canModel}
                 disabled={busy}
-                runningPart={runPart}
-                runningText={modelRunning ? job?.text : undefined}
-                activities={modelActivity}
                 running={modelRunning}
-                elapsed={elapsed}
-                onStop={stop}
-                timingRecords={modelTimingRecords}
+                progress={progress}
+                evidenceMode={evidenceMode}
+                onEvidenceMode={setEvidenceMode}
+                expressionFocus={expressionFocus}
               />
             </>
           )}

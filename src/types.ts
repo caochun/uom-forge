@@ -42,6 +42,9 @@ export interface WorkspaceDocument extends BusinessDocument {
 }
 export interface SemanticPlan {
   plan: string
+  // Preserve the actual understanding used for this run, including source
+  // snapshots; later edits must not rewrite an old fact's provenance.
+  basis?: Pick<Understanding, 'narrative' | 'sources'>
   semantic?: SemanticPlanV2
   complete: boolean
   compiled: boolean

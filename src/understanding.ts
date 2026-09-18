@@ -12,6 +12,7 @@ import type {
   ReviewedUnderstanding,
 } from './types.ts'
 import { advanceRevision } from './workspace.ts'
+import { reviseUnderstandingSources } from '../shared/understanding-sources.ts'
 
 export function answerText(answer: QuestionAnswer | undefined): string {
   return (Array.isArray(answer) ? answer.join('；') : answer || '').trim()
@@ -65,7 +66,10 @@ export function reviseUnderstanding(
   ]
     .filter(Boolean)
     .join('\n\n')
-  return { ...source, source, narrative, questions: pending, confirmedAnswers }
+  return {
+    ...source, source, narrative, questions: pending, confirmedAnswers,
+    sources: reviseUnderstandingSources(source.sources, source.narrative, narrative),
+  }
 }
 
 // Discovered ambiguities join the same catalogue; they are not business answers

@@ -4,6 +4,7 @@ import {
   buildSemanticPlan,
   extractFacts,
   mapFactsToElements,
+  organizeStories,
 } from './semantic.ts'
 import { validateSemanticPlan } from '../validation/semantic.ts'
 import { parseAnalysisRequest } from '../validation/requests.ts'
@@ -317,6 +318,44 @@ test('duplicate step orders are ambiguous and per-step errors name the missing f
     ),
     /story-1 第 1 步（提交）缺少 actor、factIds/,
   )
+})
+
+test('empty or invalid step orders cannot be coerced into a business sequence', async () => {
+  for (const order of [null, '', ' ', false, 0, -1, 1.5]) {
+    let calls = 0
+    await assert.rejects(organizeStories([fact()], async () => {
+      calls++
+      return JSON.stringify({ stories: [{ ...story(), steps: [{ ...story().steps[0], order }] }] })
+    }), /第 1 步的 order 必须是正整数/)
+    assert.equal(calls, 2)
+  }
+})
+
+test('optional step fields and duplicate references normalize without losing facts', async () => {
+  const stories = await organizeStories([fact()], async () => JSON.stringify({
+    stories: [{ ...story(), steps: [{ ...story().steps[0], condition: ' ', result: '', factIds: ['fact-1', '', ' fact-1 '] }] }],
+  }))
+  assert.equal(stories[0].steps[0].condition, undefined)
+  assert.equal(stories[0].steps[0].result, undefined)
+  assert.deepEqual(stories[0].steps[0].factIds, ['fact-1'])
+})
+
+test('aggregate story and fact coverage errors are retried before publication', async () => {
+  let storyCalls = 0
+  await organizeStories([fact()], async (prompt) => {
+    if (++storyCalls === 1) return JSON.stringify({ stories: [story(), story()] })
+    assert.match(prompt, /业务故事不完整或重复/)
+    return JSON.stringify({ stories: [story()] })
+  })
+  assert.equal(storyCalls, 2)
+  let mappingCalls = 0
+  const mappings = await mapFactsToElements([fact()], [story()], candidate, async (prompt) => {
+    if (++mappingCalls === 1) return JSON.stringify({ mappings: [] })
+    assert.match(prompt, /事实 fact-1 缺少映射结论/)
+    return JSON.stringify({ mappings: [mapping()] })
+  })
+  assert.equal(mappingCalls, 2)
+  assert.equal(mappings.length, 1)
 })
 
 test('invalid fact source ids get one structured retry before stopping the stage', async () => {

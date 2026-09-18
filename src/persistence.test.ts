@@ -5,6 +5,7 @@ import { initialRevisions } from './workspace.ts'
 import { restoreProject } from './persistence.ts'
 import { reviseUnderstanding, hasUnsavedAnswers } from './understanding.ts'
 import { freshness } from './workspace.ts'
+import { extractUnderstandingSources } from '../shared/understanding-sources.ts'
 
 const empty: Project = {
   version: 4,
@@ -23,6 +24,19 @@ const empty: Project = {
   revisions: initialRevisions,
   messages: [],
 }
+test('understanding sources and the model’s original basis survive restoration independently', () => {
+  const old = extractUnderstandingSources('客户提交。 [[source:b1]]', { name: '旧文档', blocks: [{ id: 'b1', text: '提交申请原文。' }] })
+  const current = extractUnderstandingSources('客户撤回。 [[source:b1]]', { name: '新文档', blocks: [{ id: 'b1', text: '撤回申请原文。' }] })
+  const stored: Project = {
+    ...empty,
+    understanding: reviseUnderstanding({ ...current, questions: [] }),
+    plan: { plan: '设计草案', complete: true, compiled: true, basis: old },
+  }
+  const restored = restoreProject(JSON.parse(JSON.stringify(stored)), empty)
+  assert.equal(restored.understanding?.sources?.blocks[0].text, '撤回申请原文。')
+  assert.equal(restored.plan?.basis?.sources?.blocks[0].text, '提交申请原文。')
+  assert.equal(restored.plan?.basis?.narrative, '客户提交。')
+})
 test('expression review survives save/restore, interrupted work is incomplete, and updated understanding makes it stale', () => {
   const model = {
     schemaVersion: '1',

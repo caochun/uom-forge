@@ -24,6 +24,7 @@ import {
 import type { StagePart } from '../shared/analysis.ts'
 import type { SemanticPlanV2 } from '../shared/semantic.ts'
 import { validateSemanticPlan } from '../shared/semantic-validation.ts'
+import { readUnderstandingSources } from '../shared/understanding-sources.ts'
 
 const stages = ['understand', 'model', 'compile', 'narrate', 'assess'] as const
 const evidence = (value: unknown): Evidence[] =>
@@ -155,6 +156,7 @@ function readUnderstanding(value: unknown): Understanding | null {
     narrative: text(value.narrative),
     questions,
     warnings: strings(value.warnings),
+    sources: readUnderstandingSources(value.sources, text(value.narrative)),
   }
 }
 function readAssessment(value: unknown): Assessment | null {
@@ -205,7 +207,7 @@ function readAssessment(value: unknown): Assessment | null {
 }
 function readPlan(value: unknown): SemanticPlan | null {
   if (!isRecord(value)) return null
-  const { semantic: storedSemantic, ...rest } = value
+  const { semantic: storedSemantic, basis: storedBasis, ...rest } = value
   let semantic: SemanticPlanV2 | undefined
   if (isRecord(storedSemantic)) {
     try {
@@ -220,6 +222,9 @@ function readPlan(value: unknown): SemanticPlan | null {
     complete: value.complete === true,
     compiled: value.compiled === true,
     warnings: strings(value.warnings),
+    ...(isRecord(storedBasis) && typeof storedBasis.narrative === 'string'
+      ? { basis: { narrative: storedBasis.narrative, sources: readUnderstandingSources(storedBasis.sources, storedBasis.narrative) } }
+      : {}),
     ...(semantic ? { semantic } : {}),
   }
 }

@@ -192,7 +192,8 @@ test('assessment gets one structured retry carrying the readable validation erro
   const request = parseAnalysisRequest({ stage: 'assess', model }, 'deepseek')
   const result = await runStage(
     request,
-    async (prompt) => {
+    async (prompt, options) => {
+      assert.equal(options?.outputFormat, 'json')
       prompts.push(prompt)
       if (prompts.length === 1)
         return JSON.stringify({
@@ -210,6 +211,10 @@ test('assessment gets one structured retry carrying the readable validation erro
     },
   )
   assert.equal(prompts.length, 2)
+  assert.ok(prompts[1].includes(JSON.stringify(JSON.stringify({
+    ...raw,
+    processAssessments: [{ ...raw.processAssessments[0], conclusion: '多余字段' }],
+  }))))
   assert.match(
     prompts[1],
     /上次评估输出未通过程序校验：.*第 1 个业务过程（登记事项）包含未定义的字段 conclusion/,

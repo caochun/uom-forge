@@ -2,14 +2,10 @@ import { useEffect, useState } from 'react'
 import {
   AlertTriangle,
   ArrowRight,
-  Check,
-  Circle,
   FileText,
   LoaderCircle,
   MessageCircle,
   Plus,
-  Search,
-  Square,
   Upload,
   X,
 } from 'lucide-react'
@@ -21,15 +17,12 @@ import QQDocEditor from 'qq-doc-clone'
 import ModelGraph from './ModelGraph.tsx'
 import { documentToHtml } from '../document.ts'
 import { relatedElements } from '../workspace.ts'
+import { type ModelingProgress } from '../modeling-progress.ts'
 import type { ReactNode } from 'react'
-import type { Assessment, StagePart } from '../../shared/analysis.ts'
+import type { Assessment } from '../../shared/analysis.ts'
 import type { CandidateModel } from '../../shared/model.ts'
-import type {
-  BusinessFact,
-  BusinessStory,
-  ElementMapping,
-  SemanticPlanV2,
-} from '../../shared/semantic.ts'
+import type { SemanticPlanV2 } from '../../shared/semantic.ts'
+import SemanticEvidence, { type EvidenceMode } from './SemanticEvidence.tsx'
 import { EDITABLE_COLLECTIONS } from '../types.ts'
 import type {
   AnalysisStage,
@@ -218,7 +211,6 @@ export function DocumentView({
 }
 
 import ExpressionReview from './ExpressionReview.tsx'
-import { STAGE_PART_LABELS } from '../../shared/expression.ts'
 
 const COLLECTIONS = [
   ['objects', '对象关系'],
@@ -238,636 +230,13 @@ interface CandidateViewProps {
   onEdit: OnEdit
   onAdd: (name: string, description: string) => void
   onRebuild: () => void
+  canRebuild: boolean
   disabled: boolean
-  runningPart?: StagePart | ''
-  runningText?: string
-  activities?: string[]
   running?: boolean
-  elapsed?: number
-  onStop?: () => void
-  timingRecords?: (StageTiming & { label: string })[]
-}
-
-const FACT_KIND_LABELS: Record<BusinessFact['kind'], string> = {
-  static: '静态事实',
-  event: '业务事件',
-  state: '状态变化',
-  constraint: '约束规则',
-  role: '参与角色',
-}
-const FACT_CERTAINTY_LABELS: Record<BusinessFact['certainty'], string> = {
-  explicit: '原文明确',
-  confirmed: '已确认',
-  uncertain: '待确认',
-}
-const COVERAGE_LABELS = {
-  full: '完整表达',
-  partial: '部分表达',
-  missing: '尚未表达',
-} as const
-type Coverage = keyof typeof COVERAGE_LABELS
-type EvidenceMode = 'facts' | 'stories'
-type WorkflowState = 'waiting' | 'active' | 'done' | 'attention'
-
-function RunPanel({
-  plan,
-  candidate,
-  runningPart,
-  runningText = '',
-  activities = [],
-  running = false,
-  elapsed = 0,
-  onStop,
-  timingRecords = [],
-}: {
-  plan: SemanticPlan | null
-  candidate: CandidateDraft | null
-  runningPart?: StagePart | ''
-  runningText?: string
-  activities?: string[]
-  running?: boolean
-  elapsed?: number
-  onStop?: () => void
-  timingRecords?: (StageTiming & { label: string })[]
-}) {
-  const [open, setOpen] = useState(false)
-  const semantic = plan?.semantic
-  const hasFacts = Boolean(semantic?.facts.length)
-  const hasStories =
-    semantic?.status === 'stories' || semantic?.status === 'mapped'
-  const expressionDone = Boolean(
-    candidate?.expressionReview &&
-      !['checking', 'repairing'].includes(candidate.expressionReview.status),
-  )
-  const mappingActive =
-    runningPart === 'semantic' && runningText.includes('映射')
-  const review = candidate?.expressionReview
-  const remaining = review
-    ? (review.snapshots[review.selectedSnapshot]?.check?.cases || []).filter(
-        (item) => item.status !== 'expressed',
-      ).length
-    : 0
-  const coverage =
-    semantic?.status === 'mapped'
-      ? semantic.facts.reduce(
-          (result, fact) => {
-            result[coverageForFact(fact.id, semantic.mappings)] += 1
-            return result
-          },
-          { full: 0, partial: 0, missing: 0 },
-        )
-      : null
-  const elementCount = candidate
-    ? candidate.model.objects.length +
-      candidate.model.relations.length +
-      candidate.model.actions.length +
-      candidate.model.functions.length +
-      candidate.model.rules.length +
-      candidate.model.activities.length
-    : 0
-  const durationMs = timingRecords.reduce(
-    (sum, record) => sum + (record.elapsedMs || 0),
-    0,
-  )
-  const duration =
-    durationMs >= 60000
-      ? `${Math.floor(durationMs / 60000)} 分 ${Math.round((durationMs % 60000) / 1000)} 秒`
-      : durationMs > 0
-        ? `${Math.round(durationMs / 1000)} 秒`
-        : ''
-  if (!running && !semantic && !candidate && !activities.length) return null
-  const stages: { label: string; detail: string; state: WorkflowState }[] = [
-    {
-      label: '业务事实',
-      detail: hasFacts ? `${semantic?.facts.length} 项` : '等待提取',
-      state:
-        runningPart === 'semantic' &&
-        (!hasFacts || runningText.includes('提取'))
-          ? 'active'
-          : hasFacts
-            ? 'done'
-            : 'waiting',
-    },
-    {
-      label: '业务故事',
-      detail: hasStories ? `${semantic?.stories.length || 0} 个` : '等待组织',
-      state:
-        runningPart === 'semantic' && runningText.includes('组织')
-          ? 'active'
-          : hasStories
-            ? 'done'
-            : 'waiting',
-    },
-    {
-      label: '建模判断',
-      detail: plan?.complete ? '说明已形成' : '等待判断',
-      state:
-        runningPart === 'semantic' &&
-        hasStories &&
-        !plan?.complete &&
-        !mappingActive
-          ? 'active'
-          : plan?.complete
-            ? 'done'
-            : 'waiting',
-    },
-    {
-      label: '模型编译',
-      detail: candidate ? `版本 ${candidate.revision}` : '等待编译',
-      state:
-        runningPart === 'compile' ? 'active' : candidate ? 'done' : 'waiting',
-    },
-    {
-      label: '表达检查',
-      detail: expressionDone
-        ? remaining > 0
-          ? `${remaining} 项待处理`
-          : '检查已完成'
-        : '等待检查',
-      state: ['expression', 'repair', 'recheck'].includes(runningPart || '')
-        ? 'active'
-        : expressionDone
-          ? candidate?.expressionReview?.status === 'passed'
-            ? 'done'
-            : 'attention'
-          : 'waiting',
-    },
-    {
-      label: '事实覆盖',
-      detail:
-        semantic?.status === 'mapped'
-          ? candidate?.edited
-            ? '需要更新'
-            : '映射已完成'
-          : '等待映射',
-      state: mappingActive
-        ? 'active'
-        : semantic?.status === 'mapped'
-          ? candidate?.edited
-            ? 'attention'
-            : 'done'
-          : candidate && !runningPart
-            ? 'attention'
-            : 'waiting',
-    },
-  ]
-  if (running)
-    return (
-      <section className="workflow-status run-panel" aria-label="运行面板">
-        <header>
-          <strong className="run-live">
-            <LoaderCircle className="spin" size={14} />
-            建立候选模型
-          </strong>
-          <span className="run-meta">{elapsed} 秒</span>
-          {onStop && (
-            <button type="button" className="stop-button" onClick={onStop}>
-              <Square size={12} />
-              停止
-            </button>
-          )}
-        </header>
-        <ol className="modeling-workflow">
-          {stages.map((stage, index) => (
-            <li key={stage.label} data-state={stage.state}>
-              <div className="workflow-stage">
-                <span className="workflow-marker" aria-hidden="true">
-                  {stage.state === 'done' ? (
-                    <Check size={13} />
-                  ) : stage.state === 'active' ? (
-                    <LoaderCircle className="spin" size={13} />
-                  ) : stage.state === 'attention' ? (
-                    <AlertTriangle size={13} />
-                  ) : (
-                    <Circle size={10} />
-                  )}
-                </span>
-                <span>
-                  <strong>{stage.label}</strong>
-                  <small>{stage.detail}</small>
-                </span>
-              </div>
-              {index < stages.length - 1 && <i aria-hidden="true" />}
-            </li>
-          ))}
-        </ol>
-        {!!activities.length && (
-          <p className="run-now" aria-live="polite">
-            {activities.at(-1)}
-          </p>
-        )}
-      </section>
-    )
-  return (
-    <section
-      className="workflow-status run-panel"
-      data-open={open}
-      aria-label="运行面板"
-    >
-      <header>
-        <strong>上轮运行</strong>
-        <span className="run-summary">
-          {candidate ? (
-            <b>{elementCount} 个模型元素</b>
-          ) : semantic ? (
-            <b>{semantic.facts.length} 项事实已保留</b>
-          ) : (
-            <b>未完成</b>
-          )}
-          {review && (
-            <span
-              className={
-                review.status !== 'passed' && remaining > 0 ? 'attention' : ''
-              }
-            >
-              {review.status === 'passed'
-                ? '表达检查已通过'
-                : remaining > 0
-                  ? `表达检查 ${remaining} 项待处理`
-                  : '表达检查未完成'}
-            </span>
-          )}
-          {coverage ? (
-            <span className={coverage.missing > 0 ? 'attention' : ''}>
-              覆盖 {coverage.full} / {coverage.partial} / {coverage.missing}
-            </span>
-          ) : semantic ? (
-            <span>覆盖待映射</span>
-          ) : null}
-          {duration && <span>{duration}</span>}
-        </span>
-        {(activities.length > 0 || timingRecords.length > 0) && (
-          <button
-            type="button"
-            className="text-button run-toggle"
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
-          >
-            {open ? '收起记录' : '展开记录'}
-          </button>
-        )}
-      </header>
-      {open && (
-        <div className="run-detail">
-          {!!activities.length && (
-            <ol className="modeling-activity" aria-label="运行记录">
-              {activities.map((activity, index) => {
-                const failed =
-                  activity.startsWith('任务中断') || activity === '任务已停止。'
-                return (
-                  <li
-                    key={`${activity}-${index}`}
-                    data-failed={failed || undefined}
-                  >
-                    <span aria-hidden="true">
-                      {failed ? (
-                        <AlertTriangle size={13} />
-                      ) : (
-                        <Check size={13} />
-                      )}
-                    </span>
-                    <p>{activity}</p>
-                  </li>
-                )
-              })}
-            </ol>
-          )}
-          <TimingDetails records={timingRecords} />
-        </div>
-      )}
-    </section>
-  )
-}
-
-function SemanticEvidence({
-  semantic,
-  model,
-  modelEdited,
-  onSelectElement,
-}: {
-  semantic?: SemanticPlanV2
-  model?: CandidateModel
-  modelEdited?: boolean
-  onSelectElement: (id: string) => void
-}) {
-  const [mode, setMode] = useState<EvidenceMode>('facts')
-  const [query, setQuery] = useState('')
-  const [kind, setKind] = useState<'all' | BusinessFact['kind']>('all')
-  const [cov, setCov] = useState<'all' | Coverage>('all')
-  const [selectedStoryId, setSelectedStoryId] = useState('')
-  const facts = semantic?.facts || []
-  const stories = semantic?.stories || []
-  const mappings = semantic?.mappings || []
-  const mapped = semantic?.status === 'mapped'
-  const elementNames = new Map(
-    model
-      ? [
-          ...model.objects,
-          ...model.relations,
-          ...model.actions,
-          ...model.functions,
-          ...model.rules,
-          ...model.activities,
-        ].map((item) => [item.id, item.name])
-      : [],
-  )
-  const editableIds = new Set(
-    model
-      ? [
-          ...model.objects,
-          ...model.relations,
-          ...model.actions,
-          ...model.functions,
-          ...model.rules,
-        ].map((item) => item.id)
-      : [],
-  )
-  const counts = facts.reduce(
-    (result, fact) => {
-      result[coverageForFact(fact.id, mappings)] += 1
-      return result
-    },
-    { full: 0, partial: 0, missing: 0 },
-  )
-  const normalizedQuery = query.trim().toLocaleLowerCase()
-  const visibleFacts = facts.filter(
-    (fact) =>
-      (kind === 'all' || fact.kind === kind) &&
-      (cov === 'all' || !mapped || coverageForFact(fact.id, mappings) === cov) &&
-      (!normalizedQuery ||
-        [fact.statement, fact.source, ...fact.actors, ...fact.objects]
-          .join(' ')
-          .toLocaleLowerCase()
-          .includes(normalizedQuery)),
-  )
-  const selectedStory =
-    stories.find((story) => story.id === selectedStoryId) || stories[0]
-  useEffect(() => {
-    if (stories.length && !stories.some((story) => story.id === selectedStoryId))
-      setSelectedStoryId(stories[0].id)
-  }, [stories, selectedStoryId])
-
-  if (!semantic)
-    return (
-      <div className="empty-state panel-surface">
-        运行建模后，提取出的业务事实和业务故事会先出现在这里。
-      </div>
-    )
-
-  return (
-    <div className="semantic-evidence">
-      <div className="artifact-heading">
-        <div>
-          <h2>业务依据</h2>
-          <p>
-            核对从业务说明中识别出的事实、它们组成的业务过程，以及每项事实在候选模型中的表达位置。
-          </p>
-        </div>
-        <Switcher
-          label="业务依据内容"
-          items={[
-            ['facts', `业务事实 ${facts.length}`],
-            ['stories', `业务故事 ${stories.length}`],
-          ]}
-          value={mode}
-          onChange={setMode}
-        />
-      </div>
-      {modelEdited && mapped && (
-        <Notice>
-          候选模型已经手工修改，以下覆盖对应修改前的模型；重新建模后才会更新覆盖结论。
-        </Notice>
-      )}
-      {mode === 'facts' ? (
-        <div className="fact-browser panel-surface">
-          <div className="artifact-tools">
-            <label className="search-field">
-              <Search size={14} />
-              <input
-                aria-label="搜索业务事实"
-                placeholder="搜索事实、参与者或原文"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-            </label>
-            <select
-              aria-label="按事实类型筛选"
-              value={kind}
-              onChange={(event) =>
-                setKind(event.target.value as 'all' | BusinessFact['kind'])
-              }
-            >
-              <option value="all">全部类型</option>
-              {Object.entries(FACT_KIND_LABELS).map(([value, label]) => (
-                <option value={value} key={value}>{label}</option>
-              ))}
-            </select>
-            {mapped ? (
-              <div className="coverage-summary compact" role="group" aria-label="按覆盖状态筛选">
-                <button aria-pressed={cov === 'all'} onClick={() => setCov('all')}>
-                  <span>全部</span><strong>{facts.length}</strong>
-                </button>
-                {(['full', 'partial', 'missing'] as const).map((status) => (
-                  <button
-                    key={status}
-                    className={status}
-                    aria-pressed={cov === status}
-                    onClick={() => setCov(status)}
-                  >
-                    <span>{COVERAGE_LABELS[status]}</span>
-                    <strong>{counts[status]}</strong>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <span className="muted">覆盖映射尚未完成</span>
-            )}
-            <span className="muted">显示 {visibleFacts.length}/{facts.length}</span>
-          </div>
-          <div className="fact-list">
-            {visibleFacts.map((fact) => {
-              const status = mapped ? coverageForFact(fact.id, mappings) : null
-              const factMappings = mappings.filter(
-                (mapping) => mapping.factId === fact.id,
-              )
-              const storyNames = stories
-                .filter((story) => story.factIds.includes(fact.id))
-                .map((story) => story.name)
-              return (
-                <article className="fact-row" key={fact.id}>
-                  <div className="fact-cov">
-                    {status ? (
-                      <span className={`badge ${status}`}>
-                        {COVERAGE_LABELS[status]}
-                      </span>
-                    ) : (
-                      <span className="badge pending">待映射</span>
-                    )}
-                  </div>
-                  <div className="fact-row-main">
-                    <div className="fact-meta">
-                      <span>{FACT_KIND_LABELS[fact.kind]}</span>
-                      <span className={fact.certainty === 'uncertain' ? 'uncertain' : ''}>
-                        {FACT_CERTAINTY_LABELS[fact.certainty]}
-                      </span>
-                      <code>{fact.id}</code>
-                    </div>
-                    <p>{fact.statement}</p>
-                    {!!storyNames.length && (
-                      <small>所属故事：{storyNames.join('、')}</small>
-                    )}
-                    <blockquote>
-                      <span>原文依据</span>
-                      {fact.source}
-                    </blockquote>
-                  </div>
-                  <div className="fact-expression">
-                    <span className="fact-expression-label">模型表达</span>
-                    {status ? (
-                      factMappings.length ? (
-                        factMappings.map((mapping, index) => (
-                          <div
-                            key={`${mapping.factId}-${mapping.mappingType}-${index}`}
-                            className="fact-mapping"
-                          >
-                            <div className="mapped-elements">
-                              {mapping.elementIds.length ? (
-                                mapping.elementIds.map((id) =>
-                                  editableIds.has(id) ? (
-                                    <button
-                                      type="button"
-                                      key={id}
-                                      onClick={() => onSelectElement(id)}
-                                    >
-                                      {elementNames.get(id) || id}
-                                    </button>
-                                  ) : (
-                                    <span key={id}>
-                                      {elementNames.get(id) || id}
-                                    </span>
-                                  ),
-                                )
-                              ) : (
-                                <span>没有对应模型元素</span>
-                              )}
-                            </div>
-                            {mapping.coverage !== 'full' && (
-                              <p>{mapping.explanation}</p>
-                            )}
-                          </div>
-                        ))
-                      ) : (
-                        <p className="muted">没有找到这项事实的映射记录。</p>
-                      )
-                    ) : (
-                      <p className="muted">候选模型编译后建立映射。</p>
-                    )}
-                  </div>
-                </article>
-              )
-            })}
-            {!visibleFacts.length && (
-              <div className="empty-state">没有符合当前条件的业务事实。</div>
-            )}
-          </div>
-        </div>
-      ) : !stories.length ? (
-        <div className="empty-state panel-surface">
-          业务事实已经保留，业务故事尚未形成。
-        </div>
-      ) : (
-        <div className="story-browser">
-          <nav className="story-index panel-surface" aria-label="业务故事">
-            {stories.map((story, index) => (
-              <button
-                type="button"
-                key={story.id}
-                className={selectedStory?.id === story.id ? 'active' : ''}
-                onClick={() => setSelectedStoryId(story.id)}
-              >
-                <span>{String(index + 1).padStart(2, '0')}</span>
-                <strong>{story.name}</strong>
-                <small>{story.steps.length} 个步骤 · {story.factIds.length} 项事实</small>
-              </button>
-            ))}
-          </nav>
-          {selectedStory && (
-            <StoryDetail story={selectedStory} facts={facts} />
-          )}
-        </div>
-      )}
-      {!!semantic.clarifications.length && (
-        <section className="clarification-list panel-surface">
-          <div className="panel-toolbar">
-            <h3>待确认的业务信息</h3>
-            <span className="badge partial">{semantic.clarifications.length} 项</span>
-          </div>
-          <ul>
-            {semantic.clarifications.map((item, index) => (
-              <li key={`${item.text}-${index}`}>
-                <strong>{item.text}</strong>
-                <span>依据：{item.basis}</span>
-                <span>模型影响：{item.impact}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-    </div>
-  )
-}
-
-function StoryDetail({
-  story,
-  facts,
-}: {
-  story: BusinessStory
-  facts: BusinessFact[]
-}) {
-  return (
-    <article className="story-detail panel-surface">
-      <header>
-        <span className="muted">业务目标</span>
-        <h2>{story.name}</h2>
-        <p>{story.goal}</p>
-      </header>
-      <ol className="story-steps">
-        {story.steps.map((step) => (
-          <li key={`${story.id}-${step.order}`}>
-            <span>{step.order}</span>
-            <div>
-              <strong>{step.actor}</strong>
-              <p>{step.action} · {step.object}</p>
-              {step.condition && <small>条件：{step.condition}</small>}
-              {step.result && <small>结果：{step.result}</small>}
-              <div className="story-fact-links">
-                {step.factIds.map((id) => <code key={id}>{id}</code>)}
-              </div>
-            </div>
-          </li>
-        ))}
-      </ol>
-      <details className="story-facts">
-        <summary>查看支撑这个故事的 {story.factIds.length} 项事实</summary>
-        <ul>
-          {story.factIds.map((id) => {
-            const fact = facts.find((item) => item.id === id)
-            return fact ? <li key={id}>{fact.statement}</li> : null
-          })}
-        </ul>
-      </details>
-    </article>
-  )
-}
-
-function coverageForFact(
-  factId: string,
-  mappings: ElementMapping[],
-): Coverage {
-  const matches = mappings.filter((mapping) => mapping.factId === factId)
-  if (matches.some((mapping) => mapping.coverage === 'full')) return 'full'
-  if (matches.some((mapping) => mapping.coverage === 'partial')) return 'partial'
-  return 'missing'
+  progress: ModelingProgress
+  evidenceMode: EvidenceMode
+  onEvidenceMode: (mode: EvidenceMode) => void
+  expressionFocus: number
 }
 
 export function CandidateView({
@@ -881,14 +250,13 @@ export function CandidateView({
   onEdit,
   onAdd,
   onRebuild,
+  canRebuild,
   disabled,
-  runningPart,
-  runningText,
-  activities,
   running,
-  elapsed,
-  onStop,
-  timingRecords,
+  progress,
+  evidenceMode,
+  onEvidenceMode,
+  expressionFocus,
 }: CandidateViewProps) {
   const [collection, setCollection] = useState<CollectionTab>('objects')
   const [adding, setAdding] = useState(false)
@@ -923,71 +291,25 @@ export function CandidateView({
     setCollection(kind === 'relations' ? 'objects' : kind || 'objects')
     onSelect(id)
   }
-  const semantic = plan?.semantic
-  const factCount = semantic?.facts.length || 0
-  const missingCount =
-    semantic?.status === 'mapped'
-      ? semantic.facts.filter(
-          (fact) => coverageForFact(fact.id, semantic.mappings) === 'missing',
-        ).length
-      : 0
-  const clarCount = semantic?.clarifications.length || 0
-  const totalElements = model ? elements.length + model.activities.length : 0
-  const review = candidate?.expressionReview
-  const exprRemaining =
-    review && !['checking', 'repairing'].includes(review.status)
-      ? (review.snapshots[review.selectedSnapshot]?.check?.cases || []).filter(
-          (item) => item.status !== 'expressed',
-        ).length
-      : 0
-  const tabs: { id: ModelViewMode; label: string; count?: number; warn?: string }[] = [
-    {
-      id: 'evidence',
-      label: '业务依据',
-      count: factCount || undefined,
-      warn: missingCount ? `${missingCount} 缺失` : undefined,
-    },
-    {
-      id: 'decisions',
-      label: '建模决策',
-      count: clarCount || undefined,
-    },
-    {
-      id: 'model',
-      label: '模型视图',
-      count: totalElements || undefined,
-      warn: exprRemaining ? `${exprRemaining} 待处理` : undefined,
-    },
-  ]
+  const tabs = progress.tabs
   return (
     <section className="candidate-view">
-      <RunPanel
-        plan={plan}
-        candidate={candidate}
-        runningPart={runningPart}
-        runningText={runningText}
-        activities={activities}
-        running={running}
-        elapsed={elapsed}
-        onStop={onStop}
-        timingRecords={timingRecords}
-      />
       <div className="candidate-tabs">
-        <span>建模工作区</span>
         <div className="switcher" role="group" aria-label="建模工作区内容">
           {tabs.map((tab) => (
             <button
               type="button"
               key={tab.id}
+              data-state={tab.state}
               aria-pressed={mode === tab.id}
               className={mode === tab.id ? 'active' : ''}
               onClick={() => onMode(tab.id)}
             >
-              {tab.label}
-              {tab.count !== undefined && (
-                <em className="tab-count">{tab.count}</em>
-              )}
-              {tab.warn && <em className="tab-warn">{tab.warn}</em>}
+              <span className="artifact-tab-title">
+                {tab.state === 'active' && <LoaderCircle className="spin" size={13} />}
+                {tab.label}
+              </span>
+              <small data-state={tab.state}>{tab.detail}</small>
             </button>
           ))}
         </div>
@@ -995,51 +317,54 @@ export function CandidateView({
       {mode === 'evidence' ? (
         <SemanticEvidence
           semantic={plan?.semantic}
+          sources={plan?.basis?.sources}
           model={model}
-          modelEdited={candidate?.edited}
+          modelEdited={progress.reviewStale || progress.steps.find((step) => step.id === 'mapping')?.state === 'stale'}
+          mappingDetail={progress.steps.find((step) => step.id === 'mapping')!.detail}
+          mappingRunning={Boolean(running)}
+          onRebuild={onRebuild}
+          disabled={disabled || !canRebuild}
+          mode={evidenceMode}
+          onMode={onEvidenceMode}
           onSelectElement={select}
         />
       ) : mode === 'decisions' ? (
         <article className="panel-surface reading-narrative">
           <div className="panel-toolbar">
             <div>
-              <h2>建模决策</h2>
-              <p className="panel-subtitle">从业务事实到对象、关系、动作、能力和规则的判断依据。</p>
+              <h2>模型设计</h2>
+              <p className="panel-subtitle">对象、关系、行为与规则的定义，以及设计依据和适用边界。</p>
             </div>
             <span className="muted">
-              {runningPart === 'semantic'
-                ? '正在输出'
-                : plan?.complete
-                  ? '说明已完成'
-                  : '说明尚未完成'}
+              {progress.steps.find((step) => step.id === 'decisions')?.detail}
             </span>
           </div>
           {plan?.plan ? (
             <Markdown>{modelingContent(plan.plan)}</Markdown>
           ) : (
             <div className="empty-state">
-              {runningPart
+              {progress.active?.id === 'decisions'
                 ? '正在判断对象边界和业务联系…'
                 : plan?.semantic
-                  ? '事实和故事已保留，建模决策尚未形成。'
+                  ? '事实和故事已保留，模型设计尚未形成。'
                   : '开始建模后，这里会解释模型的设计依据。'}
             </div>
           )}
-          {runningPart && (
+          {progress.active?.id === 'decisions' && (
             <div className="reading-note">
               <span className="typing-indicator">
                 <i />
                 <i />
                 <i />
               </span>
-              {STAGE_PART_LABELS[runningPart]}…
+              {progress.active.detail}…
             </div>
           )}
           {(candidate?.edited ||
             !!candidate?.expressionReview?.changes.length) &&
             plan?.compiled && (
               <Notice>
-                模型已经修正，以上保留初始建模说明。最新定义以模型视图为准，修正原因见业务表达检查。
+                初始设计，模型已有调整。最新定义以模型视图为准，自动修正原因见业务表达检查。
               </Notice>
             )}
         </article>
@@ -1049,8 +374,15 @@ export function CandidateView({
         </div>
       ) : (
         <>
+          {progress.oldCandidate && (
+            <Notice>
+              {plan?.compiled
+                ? '业务依据已变化，当前模型需要重新建模更新。'
+                : '当前显示上轮保留的模型，本轮尚未生成新候选。'}
+            </Notice>
+          )}
           {candidate && (
-            <ExpressionReview candidate={candidate} onSelect={select} />
+            <ExpressionReview candidate={candidate} onSelect={select} focusRequest={expressionFocus} stale={progress.reviewStale} />
           )}
           <div className="model-summary">
             <h2>{model.name}</h2>

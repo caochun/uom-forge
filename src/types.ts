@@ -14,7 +14,7 @@ import type { SemanticPlanV2 } from '../shared/semantic.ts'
 
 export type AnalysisStage = AnalysisRequest['stage']
 export type WorkspacePage = 'document' | 'understanding' | 'model' | 'review'
-export type ModelViewMode = 'evidence' | 'decisions' | 'model' | 'coverage'
+export type ModelViewMode = 'evidence' | 'decisions' | 'model'
 export type ReviewViewMode = 'narration' | 'assessment'
 export const EDITABLE_COLLECTIONS = [
   'objects',

@@ -248,6 +248,77 @@ test('invalid story structures get one retry while unknown facts still fail', as
   assert.equal(phases.includes('业务故事结构未通过校验，正在修正后重试。'), true)
 })
 
+test('globally numbered story steps are renumbered instead of rejected', async () => {
+  const secondFact = { ...fact(), id: 'fact-2', statement: '仓库发货', source: '仓库发货' }
+  let call = 0
+  const result = await buildSemanticPlan(
+    '客户提交订单。\n仓库发货。',
+    candidate,
+    async () => {
+      call += 1
+      if (call === 1) return JSON.stringify({ facts: [fact(), secondFact] })
+      if (call === 2)
+        return JSON.stringify({
+          stories: [
+            story(),
+            {
+              id: 'story-2',
+              name: '发货',
+              goal: '完成发货',
+              factIds: ['fact-2'],
+              // Numbered as a continuation of story-1 — a common model output.
+              steps: [
+                { order: 3, actor: '仓库', action: '发货', object: '订单', factIds: ['fact-2'] },
+                { order: 2, actor: '仓库', action: '备货', object: '订单', factIds: ['fact-2'] },
+              ],
+            },
+          ],
+        })
+      return JSON.stringify({
+        mappings: [mapping(), { ...mapping(), factId: 'fact-2' }],
+      })
+    },
+  )
+  assert.equal(call, 3)
+  assert.deepEqual(
+    result.stories[1].steps.map((step) => [step.order, step.action]),
+    [[1, '备货'], [2, '发货']],
+  )
+})
+
+test('duplicate step orders are ambiguous and per-step errors name the missing field', async () => {
+  const stubFacts = async () => JSON.stringify({ facts: [fact()] })
+  await assert.rejects(
+    buildSemanticPlan('客户提交订单。', candidate, async (prompt) =>
+      prompt.includes('业务事实提取器')
+        ? stubFacts()
+        : JSON.stringify({
+            stories: [{
+              ...story(),
+              steps: [
+                { ...story().steps[0], order: 1 },
+                { ...story().steps[0], order: 1, action: '复核' },
+              ],
+            }],
+          }),
+    ),
+    /story-1 的步骤 order 有重复/,
+  )
+  await assert.rejects(
+    buildSemanticPlan('客户提交订单。', candidate, async (prompt) =>
+      prompt.includes('业务事实提取器')
+        ? stubFacts()
+        : JSON.stringify({
+            stories: [{
+              ...story(),
+              steps: [{ ...story().steps[0], actor: '', factIds: [] }],
+            }],
+          }),
+    ),
+    /story-1 第 1 步（提交）缺少 actor、factIds/,
+  )
+})
+
 test('invalid fact source ids get one structured retry before stopping the stage', async () => {
   let call = 0
   const phases: string[] = []

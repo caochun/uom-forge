@@ -217,10 +217,11 @@ export async function organizeStories(
       if (!item || typeof item !== 'object' || Array.isArray(item))
         throw new Error(`业务故事 ${storyIndex + 1} 格式无效。`)
       const value = item as Record<string, unknown>
+      const storyId = String(value.id || `story-${storyIndex + 1}`)
       const rawSteps = Array.isArray(value.steps) ? value.steps : []
-      const steps: BusinessStory['steps'] = rawSteps.map((step) => {
+      const parsedSteps = rawSteps.map((step, stepIndex) => {
         if (!step || typeof step !== 'object' || Array.isArray(step))
-          throw new Error('业务故事步骤格式无效。')
+          throw new Error(`业务故事 ${storyId} 第 ${stepIndex + 1} 步格式无效。`)
         const value = step as Record<string, unknown>
         return {
           order: Number(value.order),
@@ -232,6 +233,17 @@ export async function organizeStories(
           factIds: stringArray(value.factIds, 'step.factIds'),
         }
       })
+      // Step order is a mechanical index. Models often number steps globally
+      // across stories or skip values; sequence is the meaning, so renumber
+      // after a stable sort and only reject genuinely ambiguous orderings.
+      const orders = parsedSteps.map((step) => step.order)
+      if (orders.some((order) => !Number.isFinite(order)))
+        throw new Error(`业务故事 ${storyId} 存在缺少 order 的步骤。`)
+      if (new Set(orders).size !== orders.length)
+        throw new Error(`业务故事 ${storyId} 的步骤 order 有重复，无法确定先后顺序。`)
+      const steps: BusinessStory['steps'] = [...parsedSteps]
+        .sort((a, b) => a.order - b.order)
+        .map((step, index) => ({ ...step, order: index + 1 }))
       const declaredFactIds = value.factIds === undefined
         ? []
         : stringArray(value.factIds, 'story.factIds')
@@ -239,7 +251,7 @@ export async function organizeStories(
       // from the steps so a valid step citation cannot be lost due to an LLM
       // omitting the same id from the parent object.
       const story: BusinessStory = {
-        id: String(value.id || `story-${storyIndex + 1}`),
+        id: storyId,
         name: String(value.name || '').trim(),
         goal: String(value.goal || '').trim(),
         factIds: [...new Set([
@@ -249,18 +261,22 @@ export async function organizeStories(
         steps,
       }
       if (!story.name || !story.goal || !story.steps.length)
-        throw new Error(`业务故事 ${story.id} 不完整。`)
+        throw new Error(`业务故事 ${story.id} 缺少 name、goal 或步骤。`)
       for (const id of story.factIds)
         if (!knownFactIds.has(id))
-          throw new Error(`业务故事引用未知事实 ${id}。`)
-      if (
-        story.steps.some(
-          (step, index) =>
-            step.order !== index + 1 || !step.actor || !step.action ||
-            !step.object || !step.factIds.length,
-        )
-      )
-        throw new Error(`业务故事 ${story.id} 的步骤顺序或主体不完整。`)
+          throw new Error(`业务故事 ${story.id} 引用未知事实 ${id}。`)
+      for (const step of story.steps) {
+        const missing = [
+          !step.actor ? 'actor' : '',
+          !step.action ? 'action' : '',
+          !step.object ? 'object' : '',
+          !step.factIds.length ? 'factIds' : '',
+        ].filter(Boolean)
+        if (missing.length)
+          throw new Error(
+            `业务故事 ${story.id} 第 ${step.order} 步（${step.action || step.actor || '未命名'}）缺少 ${missing.join('、')}。`,
+          )
+      }
       return story
     })
   }

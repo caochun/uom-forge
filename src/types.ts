@@ -14,7 +14,7 @@ import type { SemanticPlanV2 } from '../shared/semantic.ts'
 
 export type AnalysisStage = AnalysisRequest['stage']
 export type WorkspacePage = 'document' | 'understanding' | 'model' | 'review'
-export type ModelViewMode = 'evidence' | 'decisions' | 'model' | 'coverage'
+export type ModelViewMode = 'evidence' | 'decisions' | 'model'
 export type ReviewViewMode = 'narration' | 'assessment'
 export const EDITABLE_COLLECTIONS = [
   'objects',
@@ -42,6 +42,9 @@ export interface WorkspaceDocument extends BusinessDocument {
 }
 export interface SemanticPlan {
   plan: string
+  // Preserve the actual understanding used for this run, including source
+  // snapshots; later edits must not rewrite an old fact's provenance.
+  basis?: Pick<Understanding, 'narrative' | 'sources'>
   semantic?: SemanticPlanV2
   complete: boolean
   compiled: boolean

@@ -6,6 +6,7 @@ import { scopedTurn, type StageOptions } from './contracts.ts'
 
 import { extractQuestions } from '../../shared/questions.ts'
 import { runPiUnderstanding } from '../agents/pi-understanding.ts'
+import { extractUnderstandingSources } from '../../shared/understanding-sources.ts'
 
 export function understandingWarnings(narrative: string): string[] {
   const headings = new Set(
@@ -42,10 +43,12 @@ export async function readBusiness(
       )
   options.signal?.throwIfAborted()
   if (!narrative.trim()) throw new Error('未返回业务说明，请重试。')
-  const understanding = {
-    narrative,
-    questions: extractQuestions(narrative),
-    warnings: understandingWarnings(narrative),
+  const linked = extractUnderstandingSources(narrative, document)
+  const understanding: Understanding = {
+    narrative: linked.narrative,
+    sources: linked.sources,
+    questions: extractQuestions(linked.narrative),
+    warnings: [...understandingWarnings(linked.narrative), ...linked.warnings],
   }
   report({ type: 'understanding-narrative', ...understanding })
   return { understanding }

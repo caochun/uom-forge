@@ -51,6 +51,10 @@ export const ASSESSMENT_SCHEMA = {
             },
           },
           evidence,
+          // Models routinely emit a process-level status even though the
+          // server recomputes it from the requirements. Accept and ignore it
+          // instead of failing the whole assessment over a discarded field.
+          status,
         },
       },
     },

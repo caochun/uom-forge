@@ -74,3 +74,17 @@ test('an empty explanation never reaches the formatter', async () => {
   )
   assert.equal(calls, 1)
 })
+
+test('understanding delivers validated paragraph references in both SSE and the result', async () => {
+  const events: StageEvent[] = []
+  const result = await readBusiness(document, async (prompt) => {
+    assert.match(prompt, /"id":"b1"/)
+    assert.match(prompt, /\[\[source:/)
+    return '## 业务概述\n\n业务说明中的转述。 [[source:b1]]'
+  }, { runtime: 'direct', onEvent: (event) => events.push(event) })
+  assert.equal(result.understanding.narrative, '## 业务概述\n\n业务说明中的转述。')
+  assert.equal(result.understanding.sources?.blocks[0].text, document.blocks[0].text)
+  assert.deepEqual(events.find((event) => event.type === 'understanding-narrative'), {
+    type: 'understanding-narrative', ...result.understanding,
+  })
+})

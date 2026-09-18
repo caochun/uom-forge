@@ -26,6 +26,17 @@ export interface Understanding {
   narrative: string
   questions: Question[]
   warnings: string[]
+  sources?: UnderstandingSources
+}
+export interface UnderstandingSources {
+  documentName: string
+  // Original block snapshots: quotes are copied by the program, never by the LLM.
+  blocks: BusinessDocument['blocks']
+  citations: {
+    passage: string
+    origin: 'document' | 'user'
+    blockIds: string[]
+  }[]
 }
 export type SupportStatus = 'supported' | 'partial' | 'missing'
 export interface RequirementAssessment {
@@ -74,6 +85,8 @@ export interface ModelingResult {
   clarifications: BusinessClarification[]
   model: CandidateModel
   expressionReview: ExpressionReview
+  // Direct element evidence stays empty; paragraph provenance is retained in
+  // the understanding and the workspace's saved modeling basis.
   provenance: { basis: 'business-understanding'; evidence: 'unlinked' }
   validation: { elements: number; warnings: string[] }
 }

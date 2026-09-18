@@ -87,3 +87,45 @@ test('model-only assessment does not require the provider to repeat empty citati
   assert.deepEqual(result.processAssessments[0].evidence, [])
   assert.deepEqual(result.processAssessments[0].requirements[0].evidence, [])
 })
+
+test('a redundant process-level status is accepted and recomputed from the requirements', () => {
+  const raw = assessment()
+  raw.processAssessments[0].requirements[0].status = 'partial'
+  raw.processAssessments[0].requirements[0].gap = '缺少判断规则'
+  raw.processAssessments[0].requirements[0].suggestion = '补充规则'
+  const input = {
+    ...raw,
+    processAssessments: [
+      { ...raw.processAssessments[0], status: 'supported' },
+    ],
+  }
+  const result = parseAssessment(input, model)
+  assert.equal(result.processAssessments[0].status, 'partial')
+})
+
+test('schema violations are reported in reviewer language naming the process and field', () => {
+  const raw = assessment()
+  const input = {
+    ...raw,
+    processAssessments: [
+      { ...raw.processAssessments[0], conclusion: '多余字段' },
+    ],
+  }
+  assert.throws(
+    () => parseAssessment(input, model),
+    /第 1 个业务过程（登记）包含未定义的字段 conclusion/,
+  )
+  const missing = {
+    ...raw,
+    processAssessments: [
+      (() => {
+        const { reason: _reason, ...rest } = raw.processAssessments[0]
+        return rest
+      })(),
+    ],
+  }
+  assert.throws(
+    () => parseAssessment(missing, model),
+    /第 1 个业务过程（登记）缺少必需字段 reason/,
+  )
+})

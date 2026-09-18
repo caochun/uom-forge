@@ -4,6 +4,7 @@ import {
   buildSemanticPlan,
   extractFacts,
   mapFactsToElements,
+  organizeStories,
 } from './semantic.ts'
 import { validateSemanticPlan } from '../validation/semantic.ts'
 import { parseAnalysisRequest } from '../validation/requests.ts'
@@ -246,6 +247,115 @@ test('invalid story structures get one retry while unknown facts still fail', as
   assert.equal(result.stories[0].name, '下单')
   assert.equal(call, 4)
   assert.equal(phases.includes('业务故事结构未通过校验，正在修正后重试。'), true)
+})
+
+test('globally numbered story steps are renumbered instead of rejected', async () => {
+  const secondFact = { ...fact(), id: 'fact-2', statement: '仓库发货', source: '仓库发货' }
+  let call = 0
+  const result = await buildSemanticPlan(
+    '客户提交订单。\n仓库发货。',
+    candidate,
+    async () => {
+      call += 1
+      if (call === 1) return JSON.stringify({ facts: [fact(), secondFact] })
+      if (call === 2)
+        return JSON.stringify({
+          stories: [
+            story(),
+            {
+              id: 'story-2',
+              name: '发货',
+              goal: '完成发货',
+              factIds: ['fact-2'],
+              // Numbered as a continuation of story-1 — a common model output.
+              steps: [
+                { order: 3, actor: '仓库', action: '发货', object: '订单', factIds: ['fact-2'] },
+                { order: 2, actor: '仓库', action: '备货', object: '订单', factIds: ['fact-2'] },
+              ],
+            },
+          ],
+        })
+      return JSON.stringify({
+        mappings: [mapping(), { ...mapping(), factId: 'fact-2' }],
+      })
+    },
+  )
+  assert.equal(call, 3)
+  assert.deepEqual(
+    result.stories[1].steps.map((step) => [step.order, step.action]),
+    [[1, '备货'], [2, '发货']],
+  )
+})
+
+test('duplicate step orders are ambiguous and per-step errors name the missing field', async () => {
+  const stubFacts = async () => JSON.stringify({ facts: [fact()] })
+  await assert.rejects(
+    buildSemanticPlan('客户提交订单。', candidate, async (prompt) =>
+      prompt.includes('业务事实提取器')
+        ? stubFacts()
+        : JSON.stringify({
+            stories: [{
+              ...story(),
+              steps: [
+                { ...story().steps[0], order: 1 },
+                { ...story().steps[0], order: 1, action: '复核' },
+              ],
+            }],
+          }),
+    ),
+    /story-1 的步骤 order 有重复/,
+  )
+  await assert.rejects(
+    buildSemanticPlan('客户提交订单。', candidate, async (prompt) =>
+      prompt.includes('业务事实提取器')
+        ? stubFacts()
+        : JSON.stringify({
+            stories: [{
+              ...story(),
+              steps: [{ ...story().steps[0], actor: '', factIds: [] }],
+            }],
+          }),
+    ),
+    /story-1 第 1 步（提交）缺少 actor、factIds/,
+  )
+})
+
+test('empty or invalid step orders cannot be coerced into a business sequence', async () => {
+  for (const order of [null, '', ' ', false, 0, -1, 1.5]) {
+    let calls = 0
+    await assert.rejects(organizeStories([fact()], async () => {
+      calls++
+      return JSON.stringify({ stories: [{ ...story(), steps: [{ ...story().steps[0], order }] }] })
+    }), /第 1 步的 order 必须是正整数/)
+    assert.equal(calls, 2)
+  }
+})
+
+test('optional step fields and duplicate references normalize without losing facts', async () => {
+  const stories = await organizeStories([fact()], async () => JSON.stringify({
+    stories: [{ ...story(), steps: [{ ...story().steps[0], condition: ' ', result: '', factIds: ['fact-1', '', ' fact-1 '] }] }],
+  }))
+  assert.equal(stories[0].steps[0].condition, undefined)
+  assert.equal(stories[0].steps[0].result, undefined)
+  assert.deepEqual(stories[0].steps[0].factIds, ['fact-1'])
+})
+
+test('aggregate story and fact coverage errors are retried before publication', async () => {
+  let storyCalls = 0
+  await organizeStories([fact()], async (prompt) => {
+    if (++storyCalls === 1) return JSON.stringify({ stories: [story(), story()] })
+    assert.match(prompt, /业务故事不完整或重复/)
+    return JSON.stringify({ stories: [story()] })
+  })
+  assert.equal(storyCalls, 2)
+  let mappingCalls = 0
+  const mappings = await mapFactsToElements([fact()], [story()], candidate, async (prompt) => {
+    if (++mappingCalls === 1) return JSON.stringify({ mappings: [] })
+    assert.match(prompt, /事实 fact-1 缺少映射结论/)
+    return JSON.stringify({ mappings: [mapping()] })
+  })
+  assert.equal(mappingCalls, 2)
+  assert.equal(mappings.length, 1)
 })
 
 test('invalid fact source ids get one structured retry before stopping the stage', async () => {

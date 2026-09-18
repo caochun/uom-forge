@@ -217,29 +217,44 @@ export async function organizeStories(
       if (!item || typeof item !== 'object' || Array.isArray(item))
         throw new Error(`业务故事 ${storyIndex + 1} 格式无效。`)
       const value = item as Record<string, unknown>
+      const storyId = String(value.id || `story-${storyIndex + 1}`)
       const rawSteps = Array.isArray(value.steps) ? value.steps : []
-      const steps: BusinessStory['steps'] = rawSteps.map((step) => {
+      const parsedSteps = rawSteps.map((step, stepIndex) => {
         if (!step || typeof step !== 'object' || Array.isArray(step))
-          throw new Error('业务故事步骤格式无效。')
+          throw new Error(`业务故事 ${storyId} 第 ${stepIndex + 1} 步格式无效。`)
         const value = step as Record<string, unknown>
+        const order = typeof value.order === 'number' ||
+          (typeof value.order === 'string' && value.order.trim())
+          ? Number(value.order) : NaN
+        if (!Number.isInteger(order) || order < 1)
+          throw new Error(`业务故事 ${storyId} 第 ${stepIndex + 1} 步的 order 必须是正整数。`)
         return {
-          order: Number(value.order),
+          order,
           actor: String(value.actor || '').trim(),
           action: String(value.action || '').trim(),
           object: String(value.object || '').trim(),
-          condition: value.condition == null ? undefined : String(value.condition),
-          result: value.result == null ? undefined : String(value.result),
-          factIds: stringArray(value.factIds, 'step.factIds'),
+          condition: value.condition == null ? undefined : String(value.condition).trim() || undefined,
+          result: value.result == null ? undefined : String(value.result).trim() || undefined,
+          factIds: cleanStringArray(value.factIds, `${storyId} 第 ${stepIndex + 1} 步的 factIds`),
         }
       })
+      // Step order is a mechanical index. Models often number steps globally
+      // across stories or skip values; sequence is the meaning, so renumber
+      // after a stable sort and only reject genuinely ambiguous orderings.
+      const orders = parsedSteps.map((step) => step.order)
+      if (new Set(orders).size !== orders.length)
+        throw new Error(`业务故事 ${storyId} 的步骤 order 有重复，无法确定先后顺序。`)
+      const steps: BusinessStory['steps'] = [...parsedSteps]
+        .sort((a, b) => a.order - b.order)
+        .map((step, index) => ({ ...step, order: index + 1 }))
       const declaredFactIds = value.factIds === undefined
         ? []
-        : stringArray(value.factIds, 'story.factIds')
+        : cleanStringArray(value.factIds, 'story.factIds')
       // The story-level list is a redundant index. Derive its complete value
       // from the steps so a valid step citation cannot be lost due to an LLM
       // omitting the same id from the parent object.
       const story: BusinessStory = {
-        id: String(value.id || `story-${storyIndex + 1}`),
+        id: storyId,
         name: String(value.name || '').trim(),
         goal: String(value.goal || '').trim(),
         factIds: [...new Set([
@@ -249,18 +264,22 @@ export async function organizeStories(
         steps,
       }
       if (!story.name || !story.goal || !story.steps.length)
-        throw new Error(`业务故事 ${story.id} 不完整。`)
+        throw new Error(`业务故事 ${story.id} 缺少 name、goal 或步骤。`)
       for (const id of story.factIds)
         if (!knownFactIds.has(id))
-          throw new Error(`业务故事引用未知事实 ${id}。`)
-      if (
-        story.steps.some(
-          (step, index) =>
-            step.order !== index + 1 || !step.actor || !step.action ||
-            !step.object || !step.factIds.length,
-        )
-      )
-        throw new Error(`业务故事 ${story.id} 的步骤顺序或主体不完整。`)
+          throw new Error(`业务故事 ${story.id} 引用未知事实 ${id}。`)
+      for (const step of story.steps) {
+        const missing = [
+          !step.actor ? 'actor' : '',
+          !step.action ? 'action' : '',
+          !step.object ? 'object' : '',
+          !step.factIds.length ? 'factIds' : '',
+        ].filter(Boolean)
+        if (missing.length)
+          throw new Error(
+            `业务故事 ${story.id} 第 ${step.order} 步（${step.action || step.actor || '未命名'}）缺少 ${missing.join('、')}。`,
+          )
+      }
       return story
     })
   }
@@ -273,7 +292,11 @@ ${formatError ? `上次结果未通过程序校验：${formatError}\n请只修�
       { ...scopedTurn(options, 'semantic'), outputFormat: 'json' },
     )
     try {
-      return parseStories(raw)
+      const stories = parseStories(raw)
+      // Keep aggregate checks inside the retry boundary too (e.g. duplicate
+      // story ids). A successful parse must satisfy the published contract.
+      validateSemanticPlan({ schemaVersion: '2', status: 'stories', facts, stories, mappings: [], boundaries: [], clarifications: [] })
+      return stories
     } catch (error) {
       formatError = error instanceof Error ? error.message : String(error)
       if (attempt === 1) throw error
@@ -380,7 +403,9 @@ ${formatError ? `上次结果未通过程序校验：${formatError}\n请只修�
       { ...scopedTurn(options, 'semantic'), outputFormat: 'json' },
     )
     try {
-      return parseMappings(raw)
+      const mappings = parseMappings(raw)
+      validateSemanticPlan({ schemaVersion: '2', status: 'mapped', facts, stories, mappings, boundaries: [], clarifications: [] }, undefined, model)
+      return mappings
     } catch (error) {
       formatError = error instanceof Error ? error.message : String(error)
       if (attempt === 1) throw error

@@ -16,6 +16,7 @@ type AssessmentOutput = Omit<Assessment, 'processAssessments'> & {
     ProcessAssessment,
     'status' | 'evidence' | 'requirements'
   > & {
+    status?: SupportStatus
     evidence?: []
     requirements: (Omit<RequirementAssessment, 'evidence'> & {
       evidence?: []
@@ -23,6 +24,74 @@ type AssessmentOutput = Omit<Assessment, 'processAssessments'> & {
   })[]
 }
 const validateSchema = ajv.compile<AssessmentOutput>(ASSESSMENT_SCHEMA)
+
+function valueAt(root: unknown, segments: string[]): unknown {
+  let current = root
+  for (const segment of segments) {
+    if (Array.isArray(current)) current = current[Number(segment)]
+    else if (current && typeof current === 'object')
+      current = (current as Record<string, unknown>)[segment]
+    else return undefined
+  }
+  return current
+}
+
+// Ajv reports machine paths like data/processAssessments/1; reviewers and the
+// structured retry both need the location and the offending field in words.
+function describeLocation(path: string, root: unknown): string {
+  const segments = path.split('/').filter(Boolean)
+  if (!segments.length) return '评估结果'
+  const parts: string[] = []
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index]
+    if (segment === 'processAssessments' && /^\d+$/.test(segments[index + 1] || '')) {
+      const process = Number(segments[++index])
+      const name = valueAt(root, ['processAssessments', String(process), 'processName'])
+      parts.push(
+        `第 ${process + 1} 个业务过程${typeof name === 'string' && name ? `（${name}）` : ''}`,
+      )
+    } else if (segment === 'requirements' && /^\d+$/.test(segments[index + 1] || '')) {
+      parts.push(`第 ${Number(segments[++index]) + 1} 项要求`)
+    } else if (segment === 'clarifications' && /^\d+$/.test(segments[index + 1] || '')) {
+      parts.push(`第 ${Number(segments[++index]) + 1} 条澄清`)
+    } else if (segment === 'recommendations' && /^\d+$/.test(segments[index + 1] || '')) {
+      parts.push(`第 ${Number(segments[++index]) + 1} 条共性建议`)
+    } else {
+      parts.push(`字段 ${segment}`)
+    }
+  }
+  return parts.join('的')
+}
+
+function readableSchemaErrors(
+  errors: typeof validateSchema.errors,
+  root: unknown,
+): string {
+  const lines = (errors || []).map((error) => {
+    const where = describeLocation(error.instancePath, root)
+    const params = error.params as Record<string, unknown>
+    switch (error.keyword) {
+      case 'additionalProperties':
+        return `${where}包含未定义的字段 ${String(params.additionalProperty)}，请删除该字段。`
+      case 'required':
+        return `${where}缺少必需字段 ${String(params.missingProperty)}。`
+      case 'enum':
+        return `${where}的取值不在允许范围内。`
+      case 'type':
+        return `${where}的类型不正确。`
+      case 'minLength':
+      case 'pattern':
+        return `${where}不能为空。`
+      case 'minItems':
+        return `${where}至少需要一项。`
+      case 'maxItems':
+        return `${where}必须为空数组。`
+      default:
+        return `${where}${error.message || '无效'}。`
+    }
+  })
+  return [...new Set(lines)].slice(0, 5).join(' ')
+}
 function processStatus(
   requirements: Pick<RequirementAssessment, 'status'>[],
 ): SupportStatus {
@@ -37,7 +106,7 @@ export function parseAssessment(
 ): Assessment {
   if (!validateSchema(value))
     throw new Error(
-      `评估结构不完整：${ajv.errorsText(validateSchema.errors).slice(0, 1800)}`,
+      `评估结构不完整：${readableSchemaErrors(validateSchema.errors, value).slice(0, 1800)}`,
     )
   const elements = new Set(
     [

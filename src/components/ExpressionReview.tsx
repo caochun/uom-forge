@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CandidateDraft } from '../types.ts'
 import type { ExpressionCase } from '../../shared/expression.ts'
 import { EXPRESSION_STATUS } from '../../shared/expression.ts'
@@ -11,12 +11,23 @@ const labels = {
 export default function ExpressionReview({
   candidate,
   onSelect,
+  focusRequest = 0,
+  stale = false,
 }: {
   candidate: CandidateDraft
+  focusRequest?: number
+  stale?: boolean
   onSelect: (id: string) => void
 }) {
   const review = candidate.expressionReview
   const [showPassed, setShowPassed] = useState(false)
+  const details = useRef<HTMLDetailsElement>(null)
+  useEffect(() => {
+    if (focusRequest && details.current) {
+      details.current.open = true
+      details.current.scrollIntoView({ block: 'nearest' })
+    }
+  }, [focusRequest])
   if (!review) return null
   const latest = review.snapshots[review.selectedSnapshot]
   const reverted = review.snapshots.length > 1 && review.selectedSnapshot === 0
@@ -87,12 +98,12 @@ export default function ExpressionReview({
     </article>
   )
   return (
-    <details className="expression-review panel-surface">
+    <details ref={details} className="expression-review panel-surface">
       <summary>
         <strong>业务表达检查</strong>
         <span>
-          {candidate.edited
-            ? '模型已手工修改，以下检查对应修改前版本'
+          {stale || candidate.edited
+            ? '以下检查对应先前版本，需要更新'
             : EXPRESSION_STATUS[review.status]}
         </span>
         {check && (
@@ -127,7 +138,7 @@ export default function ExpressionReview({
             </ul>
           </details>
         )}
-        {remaining.map((item) => card(item, !candidate.edited))}
+        {remaining.map((item) => card(item, !stale && !candidate.edited))}
         {cases.some((item) => item.status === 'expressed') && (
           <>
             <button
@@ -140,7 +151,7 @@ export default function ExpressionReview({
             {showPassed &&
               cases
                 .filter((item) => item.status === 'expressed')
-                .map((item) => card(item, !candidate.edited))}
+                .map((item) => card(item, !stale && !candidate.edited))}
           </>
         )}
         {review.snapshots.length > 1 && (

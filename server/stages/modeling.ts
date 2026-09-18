@@ -214,10 +214,7 @@ async function compileReviewedPlan(
       provenance: { basis: 'business-understanding', evidence: 'unlinked' },
       validation: {
         elements,
-        warnings: [
-          ...review.warnings,
-          '基于业务说明建模，尚未关联原文证据。',
-        ],
+        warnings: [...review.warnings],
       },
     }
   } catch (error) {

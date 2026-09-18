@@ -16,6 +16,13 @@ for (const [key, value] of Object.entries(
 
 export default defineConfig({
   server: { host: '0.0.0.0', allowedHosts: ['onto.njuics.cn'] },
+  // qq-doc-clone is a linked (file:) package, so the dependency scanner does
+  // not reliably reach its CommonJS transitive dependency on a cold cache;
+  // without prebundling, the browser imports the raw CJS file and fails on
+  // the named export. Include the chain explicitly (Vite's monorepo recipe).
+  optimizeDeps: {
+    include: ['qq-doc-clone > @tiptap/react > use-sync-external-store/shim'],
+  },
   plugins: [
     react(),
     {

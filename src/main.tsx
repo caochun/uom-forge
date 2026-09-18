@@ -19,6 +19,9 @@ import { documentToBlocks, readSse } from './document.ts'
 import { advanceRevision, freshness, initialRevisions } from './workspace.ts'
 import { extractQuestions } from '../shared/questions.ts'
 import BusinessUnderstanding from './components/BusinessUnderstanding.tsx'
+import { reviseUnderstandingSources } from '../shared/understanding-sources.ts'
+import ModelingRun from './components/ModelingRun.tsx'
+import { modelingProgress, latestModelTimings, prepareCompilationRetry, type ModelRunStatus, type ProgressItem } from './modeling-progress.ts'
 import {
   CandidateView,
   DocumentView,
@@ -74,7 +77,7 @@ const EMPTY_DOCUMENT = {
 const PAGES = [
   ['document', '业务文档', FileText],
   ['understanding', '业务理解', Activity],
-  ['model', '候选模型', Network],
+  ['model', '建模', Network],
   ['review', '模型检验', ClipboardCheck],
 ] as const
 const STAGES = {
@@ -119,7 +122,10 @@ function loadProject(): Project {
 function App() {
   const [project, setProject] = useState(loadProject)
   const [view, setView] = useState<WorkspacePage>('document')
-  const [modelMode, setModelMode] = useState<ModelViewMode>('model')
+  const [modelMode, setModelMode] = useState<ModelViewMode>('evidence')
+  const [evidenceMode, setEvidenceMode] = useState<'facts' | 'stories'>('facts')
+  const [expressionFocus, setExpressionFocus] = useState(0)
+  const [modelRunStatus, setModelRunStatus] = useState<ModelRunStatus>()
   const [reviewMode, setReviewMode] = useState<ReviewViewMode>('narration')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [assistantOpen, setAssistantOpen] = useState(
@@ -238,6 +244,7 @@ function App() {
         : failure instanceof Error
           ? failure.message
           : String(failure)
+      setModelRunStatus((status) => status === 'running' ? stopped ? 'stopped' : 'failed' : status)
       if (!stopped) setError(message)
       addMessage({ role: 'assistant', content: message })
     } finally {
@@ -297,10 +304,13 @@ function App() {
     const addModelActivity = (text: string) => {
       if (!tracksModeling || !text.trim()) return
       setModelActivity((current) =>
-        current.at(-1) === text ? current : [...current, text].slice(-8),
+        current.at(-1) === text ? current : [...current, text].slice(-100),
       )
     }
-    if (tracksModeling) setModelActivity([`${STAGES[stage]}已开始。`])
+    if (tracksModeling) {
+      setModelActivity([`${STAGES[stage]}已开始。`])
+      setModelRunStatus('running')
+    }
     setJob({
       stage,
       started,
@@ -321,11 +331,23 @@ function App() {
     if (stage === 'assess') setReviewMode('assessment')
     if (stage === 'understand') setReadingText('')
     if (stage === 'model') {
-      setModelMode('evidence')
       setProject((current) => ({
         ...current,
-        plan: { plan: '', complete: false, compiled: false },
+        plan: {
+          plan: '', complete: false, compiled: false,
+          basis: current.understanding ? {
+            narrative: current.understanding.narrative,
+            sources: current.understanding.sources,
+          } : undefined,
+        },
         outputs: { ...current.outputs, compile: '' },
+        timings: { ...current.timings, model: [], compile: [] },
+      }))
+    } else if (stage === 'compile') {
+      setProject((current) => ({
+        ...current,
+        plan: current.plan ? prepareCompilationRetry(current.plan) : null,
+        timings: { ...current.timings, model: [], compile: [] },
       }))
     }
     setProject((current) => ({
@@ -411,25 +433,24 @@ function App() {
           if (stage === 'narrate')
             setNarratingText((current) => current + (event.text || ''))
           if (stage === 'model' && event.part === 'semantic')
-            setProject((current) => ({
+            setProject((current) => current.plan?.semantic?.status === 'stories' && !current.plan.complete ? ({
               ...current,
               plan: {
-                complete: false,
-                compiled: false,
                 ...current.plan,
                 plan: (current.plan?.plan || '') + (event.text || ''),
               },
-            }))
+            }) : current)
         }
       }
       if (event.type === 'model-plan') {
-        addModelActivity('建模决策已形成，正在编译候选模型。')
+        addModelActivity('设计草案已生成，正在编译候选模型。')
         setProject((current) =>
           receiveClarifications(
             {
               ...current,
               plan: {
                 plan: event.semanticPlan,
+                basis: current.plan?.basis,
                 complete: true,
                 compiled: false,
                 warnings: event.warnings,
@@ -511,6 +532,7 @@ function App() {
     }
     if (!isStageResult(stage, result))
       throw new Error('服务返回的结果与当前阶段不匹配')
+    if (tracksModeling) setModelRunStatus('completed')
     setProject((current) => ({
       ...current,
       messages: current.messages.map((message) =>
@@ -527,7 +549,7 @@ function App() {
       setModelActivity((current) =>
         current.at(-1) === '任务已停止。'
           ? current
-          : [...current, '任务已停止。'].slice(-8),
+          : [...current, '任务已停止。'].slice(-100),
       )
     abortRef.current?.abort()
   }
@@ -589,14 +611,10 @@ function App() {
             ...current,
             plan: {
               plan: result.semanticPlan,
+              basis: current.plan?.basis,
               complete: true,
               compiled: true,
-              warnings: [
-                ...new Set([
-                  ...(retry ? current.plan?.warnings || [] : []),
-                  ...result.validation.warnings,
-                ]),
-              ],
+              warnings: [...new Set(result.validation.warnings)],
               ...(result.semantic
                 ? { semantic: result.semantic }
                 : current.plan?.semantic
@@ -615,7 +633,6 @@ function App() {
           'model',
         )
       })
-      setModelMode('model')
       setSelectedId(null)
       addMessage({
         role: 'assistant',
@@ -826,11 +843,95 @@ function App() {
   const visibleStages: AnalysisStage[] =
     view === 'understanding'
       ? ['understand']
-      : view === 'model'
-        ? ['model', 'compile']
-        : view === 'review'
-          ? ['narrate', 'assess']
-          : []
+      : view === 'review'
+        ? ['narrate', 'assess']
+        : []
+  const modelTimingRecords = latestModelTimings(project.timings || {}).map((record) => ({
+    ...record,
+    label: record.part ? STAGE_PART_LABELS[record.part] : '建模',
+  }))
+  const progress = modelingProgress({
+    plan: project.plan,
+    candidate: project.candidate,
+    runningPart: runPart,
+    planStale: !modelRunning && stale.plan,
+    candidateStale: stale.candidate,
+  })
+  const viewModelStep = (step: ProgressItem) => {
+    setView('model')
+    setModelMode(step.tab)
+    if (step.tab === 'evidence') setEvidenceMode(step.id === 'stories' ? 'stories' : 'facts')
+    if (step.id === 'expression') setExpressionFocus((count) => count + 1)
+  }
+  type TodoItem = {
+    key: string
+    text: string
+    action?: { label: string; run: () => void; disabled?: boolean }
+  }
+  const todos: TodoItem[] = []
+  if (unsavedAnswers && !stale.understanding)
+    todos.push({
+      key: 'answers',
+      text: '问题答案有尚未保存的修改；当前正文和讨论仍使用已保存的业务理解。',
+      action: {
+        label: '保存并更新业务说明',
+        disabled: busy,
+        run: () => {
+          setProject(saveUnderstandingAnswers)
+          setToast('补充说明已并入业务理解，请根据更新后的说明建模。')
+        },
+      },
+    })
+  if (
+    (view === 'model' || view === 'review') &&
+    pendingQuestions > 0 &&
+    !stale.understanding
+  )
+    todos.push({
+      key: 'questions',
+      text: `${pendingQuestions} 项业务信息待确认，候选模型保留当前不确定边界。`,
+      action: { label: '到业务理解确认', run: openQuestions },
+    })
+  if (view === 'understanding' && project.understanding && stale.understanding)
+    todos.push({
+      key: 'stale-understanding',
+      text: '文档已更换，以下说明来自先前文档。',
+      action: { label: '重新理解业务', disabled: busy, run: readBusiness },
+    })
+  if (view === 'model' && model && stale.candidate)
+    todos.push({
+      key: 'stale-model',
+      text: '业务理解或反馈已变化，当前是旧模型，需要重新建模。',
+      action: { label: '重新建模', disabled: busy || !canModel, run: () => build() },
+    })
+  if (view === 'model' && project.plan?.complete && !project.plan.compiled)
+    todos.push({
+      key: 'retry-compile',
+      text: stale.plan
+        ? '建模依据已变化，这份说明不能直接重试整理，请重新建模。'
+        : modelRunning
+          ? '设计草案已生成，正在整理候选模型。'
+          : '建模说明已保留，候选模型尚未更新。',
+      ...(canRetry && !busy
+        ? { action: { label: '重新整理模型', run: () => build(true) } }
+        : {}),
+    })
+  if (view === 'model')
+    for (const [index, warning] of (project.plan?.warnings || []).entries())
+      todos.push({ key: `warning-${index}`, text: warning })
+  if (
+    view === 'review' &&
+    (reviewMode === 'narration'
+      ? project.narration && stale.narration
+      : project.assessment && stale.assessment)
+  )
+    todos.push({
+      key: 'stale-review',
+      text: '以下检验来自旧版本，业务依据或候选模型已变化。',
+      action: stale.candidate
+        ? { label: '先重新建模', disabled: busy || !canModel, run: () => build() }
+        : { label: '重新检验模型', disabled: busy || !canCheck, run: () => checkModel() },
+    })
   const primary =
     view === 'document'
       ? {
@@ -980,14 +1081,9 @@ function App() {
                   {editing ? '取消修改' : '修正业务说明'}
                 </button>
               )}
-              {view === 'model' && model && (canCheck || canRetry) && (
-                <button
-                  className="secondary-button"
-                  disabled={busy || !canModel}
-                  onClick={() => build()}
-                >
-                  <RefreshCw size={14} />
-                  重新建模
+              {view === 'model' && (project.plan || model) && (
+                <button className="secondary-button" disabled={busy || !canModel} onClick={() => build()}>
+                  <RefreshCw size={14} />重新建模
                 </button>
               )}
               <button
@@ -1000,33 +1096,38 @@ function App() {
               </button>
             </div>
           </div>
-          {unsavedAnswers && !stale.understanding && (
-            <Notice>
-              问题答案有尚未保存的修改。请先保存补充说明，再进行建模或评估；当前正文和讨论仍使用已保存的业务理解。
-              <button
-                className="text-button"
-                disabled={busy}
-                onClick={() => {
-                  setProject(saveUnderstandingAnswers)
-                  setToast('补充说明已并入业务理解，请根据更新后的说明建模。')
-                }}
-              >
-                保存并更新业务说明
-              </button>
-            </Notice>
+          {todos.length > 0 && (
+            <div className="todo-bar" role="status">
+              {todos.map((item) => (
+                <span className="todo-item" key={item.key}>
+                  {item.text}
+                  {item.action && (
+                    <button
+                      className="text-button"
+                      disabled={item.action.disabled}
+                      onClick={item.action.run}
+                    >
+                      {item.action.label}
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
           )}
-          {(view === 'model' || view === 'review') &&
-            pendingQuestions > 0 &&
-            !stale.understanding && (
-              <Notice>
-                有 {pendingQuestions}{' '}
-                项业务信息待确认，统一在业务理解中处理。候选模型保留当前不确定边界；保存补充说明后需要重新建模。
-                <button className="text-button" onClick={openQuestions}>
-                  到业务理解确认
-                </button>
-              </Notice>
-            )}
-          {job && (
+          {(modelRunning || (!job && view === 'model' && (project.plan || model || modelActivity.length > 0))) && (
+            <ModelingRun
+              progress={progress}
+              running={modelRunning}
+              text={modelRunning ? job.text : ''}
+              elapsed={elapsed}
+              status={modelRunStatus}
+              activities={modelActivity}
+              records={modelTimingRecords}
+              onStop={stop}
+              onView={viewModelStep}
+            />
+          )}
+          {job && !modelRunning && (
             <div className="run-status" role="status">
               <span className="typing-indicator">
                 <i />
@@ -1034,13 +1135,7 @@ function App() {
                 <i />
               </span>
               <div>
-                <strong>
-                  {STAGES[job.stage]}
-                  {modelRunning
-                    ? ' · ' +
-                      (runPart ? STAGE_PART_LABELS[runPart] : '形成建模说明')
-                    : ''}
-                </strong>
+                <strong>{STAGES[job.stage]}</strong>
                 <small>
                   {runtimeLabel} · {providerLabel} · {elapsed} 秒 · {job.text}
                 </small>
@@ -1097,18 +1192,6 @@ function App() {
           )}
           {view === 'understanding' && (
             <>
-              {project.understanding && stale.understanding && (
-                <Notice>
-                  文档已更换，以下说明来自先前文档。
-                  <button
-                    className="text-button"
-                    disabled={busy}
-                    onClick={readBusiness}
-                  >
-                    重新理解业务
-                  </button>
-                </Notice>
-              )}
               {editing ? (
                 <form
                   className="narrative-editor panel-surface"
@@ -1121,6 +1204,11 @@ function App() {
                         narrative: editedNarrative,
                         questions: extractQuestions(editedNarrative),
                         warnings: [],
+                        sources: reviseUnderstandingSources(
+                          current.understanding?.sources,
+                          current.understanding?.narrative || '',
+                          editedNarrative,
+                        ),
                       }),
                       answers: {},
                       questionsSaved: false,
@@ -1178,25 +1266,6 @@ function App() {
           )}
           {view === 'model' && (
             <>
-              {model && stale.candidate && (
-                <Notice>
-                  业务理解或反馈已变化，当前图是旧模型，需要重新建模。
-                </Notice>
-              )}
-              {project.plan?.complete && !project.plan.compiled && (
-                <Notice>
-                  {stale.plan
-                    ? '建模依据已变化，这份说明不能直接重试整理，请重新建模。'
-                    : modelRunning
-                      ? '建模说明已完成，正在整理候选模型。'
-                      : '建模说明已保留，候选模型尚未更新。'}
-                  {canRetry && !busy && (
-                    <button className="text-button" onClick={() => build(true)}>
-                      重新整理模型
-                    </button>
-                  )}
-                </Notice>
-              )}
               <CandidateView
                 candidate={project.candidate}
                 plan={project.plan}
@@ -1208,24 +1277,18 @@ function App() {
                 onEdit={editElement}
                 onAdd={addObject}
                 onRebuild={() => build()}
+                canRebuild={canModel}
                 disabled={busy}
-                runningPart={runPart}
-                runningText={modelRunning ? job?.text : undefined}
-                activities={modelActivity}
                 running={modelRunning}
+                progress={progress}
+                evidenceMode={evidenceMode}
+                onEvidenceMode={setEvidenceMode}
+                expressionFocus={expressionFocus}
               />
             </>
           )}
           {view === 'review' && (
             <>
-              {(reviewMode === 'narration'
-                ? project.narration && stale.narration
-                : project.assessment && stale.assessment) && (
-                <Notice>
-                  以下检验来自旧版本，业务依据或候选模型已变化。
-                  {stale.candidate ? '请先重新建模。' : '请重新检验模型。'}
-                </Notice>
-              )}
               <div className="review-actions">
                 <button
                   className="text-button"
@@ -1268,7 +1331,7 @@ function App() {
               />
             </>
           )}
-          {(view === 'model' || view === 'review') && project.understanding && (
+          {view === 'review' && project.understanding && (
             <section className="feedback-panel panel-surface">
               <label htmlFor="model-feedback">下一轮建模反馈</label>
               <p>

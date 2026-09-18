@@ -1076,9 +1076,14 @@ textarea:focus,
   font-size: 12px;
   line-height: 1.7;
 }
-.semantic-evidence,
+.semantic-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
 .artifact-tools {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 12px 15px;
@@ -1172,6 +1177,7 @@ textarea:focus,
   align-items: baseline;
   gap: 6px;
   padding: 7px 12px;
+  white-space: nowrap;
 }
 .coverage-summary.compact strong {
   font-size: 13px;

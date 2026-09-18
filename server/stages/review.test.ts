@@ -185,3 +185,57 @@ test('assessment distinguishes model changes from business clarifications ground
     /重复/,
   )
 })
+
+test('assessment gets one structured retry carrying the readable validation error', async () => {
+  const prompts: string[] = []
+  const phases: string[] = []
+  const request = parseAnalysisRequest({ stage: 'assess', model }, 'deepseek')
+  const result = await runStage(
+    request,
+    async (prompt) => {
+      prompts.push(prompt)
+      if (prompts.length === 1)
+        return JSON.stringify({
+          ...raw,
+          processAssessments: [
+            { ...raw.processAssessments[0], conclusion: '多余字段' },
+          ],
+        })
+      return JSON.stringify(raw)
+    },
+    {
+      onEvent: (event) => {
+        if (event.type === 'phase') phases.push(event.text)
+      },
+    },
+  )
+  assert.equal(prompts.length, 2)
+  assert.match(
+    prompts[1],
+    /上次评估输出未通过程序校验：.*第 1 个业务过程（登记事项）包含未定义的字段 conclusion/,
+  )
+  assert.equal(
+    phases.includes('评估结果未通过程序校验，正在请求一次结构化重试。'),
+    true,
+  )
+  assert.ok('assessment' in result)
+  assert.equal(result.assessment.processAssessments[0].status, 'supported')
+})
+
+test('a second invalid assessment stops with the readable error instead of looping', async () => {
+  let calls = 0
+  const request = parseAnalysisRequest({ stage: 'assess', model }, 'deepseek')
+  await assert.rejects(
+    runStage(request, async () => {
+      calls++
+      return JSON.stringify({
+        ...raw,
+        processAssessments: [
+          { ...raw.processAssessments[0], conclusion: '多余字段' },
+        ],
+      })
+    }),
+    /评估结构不完整：第 1 个业务过程（登记事项）包含未定义的字段 conclusion/,
+  )
+  assert.equal(calls, 2)
+})

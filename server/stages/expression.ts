@@ -1,3 +1,7 @@
+import { artifactVersion } from '../../shared/workflow.ts'
+import type { ExpressionBaseline } from '../../shared/expression.ts'
+import type { SemanticPlanV2 } from '../../shared/semantic.ts'
+import { containsBasis } from '../../shared/clarifications.ts'
 import type { ExpressionReview } from '../../shared/expression.ts'
 import type { ModelingResult } from '../../shared/analysis.ts'
 import { MODEL_COLLECTIONS } from '../../shared/model.ts'
@@ -16,16 +20,31 @@ async function runExpressionCheck(
   model: ModelingResult['model'],
   runTurn: RunTurn,
   options: StageOptions,
-  previous?: import('../../shared/expression.ts').ExpressionCheck,
+  previous?: ExpressionBaseline,
+  semantic?: SemanticPlanV2,
+  mode: 'initial' | 'recheck' = 'recheck',
 ): Promise<import('../../shared/expression.ts').ExpressionCheck> {
   let formatError = ''
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await runTurn(
-      expressionPrompt(narrative, model, previous, formatError),
-      scopedTurn(options, previous ? 'recheck' : 'expression'),
+      expressionPrompt(
+        narrative,
+        model,
+        previous,
+        formatError,
+        semantic?.understandingReview,
+        mode,
+      ),
+      scopedTurn(options, mode === 'recheck' ? 'recheck' : 'expression'),
     )
     try {
-      return parseExpressionCheck(raw, narrative, model, previous)
+      const check = parseExpressionCheck(raw, narrative, model, previous, mode)
+      if (semantic) for (const item of check.cases) {
+        if (item.factIds?.some(id => !semantic.facts.some(f => f.id === id)))
+          throw new Error(`检查用例 ${item.id} 引用了未知事实。`)
+        item.factIds ??= semantic.facts.filter(f => containsBasis(item.basis, f.source)).map(f => f.id)
+      }
+      return check
     } catch (error) {
       formatError = errorMessage(error)
       // Provider failures are not recoverable by changing the prompt; let
@@ -36,6 +55,7 @@ async function runExpressionCheck(
         '复查必须',
         '复查遗漏',
         '复查用例',
+        '复查不能',
         '重复检查用例',
         '检查用例',
         '可表达用例',
@@ -45,7 +65,7 @@ async function runExpressionCheck(
       if (attempt === 1) throw error
       options.onEvent?.({
         type: 'phase',
-        part: previous ? 'recheck' : 'expression',
+        part: mode === 'recheck' ? 'recheck' : 'expression',
         text: '检查结果格式无效，正在请求一次结构化重试。',
       })
     }
@@ -60,21 +80,47 @@ export async function checkAndRepair(
   narrative: string,
   runTurn: RunTurn,
   options: StageOptions,
+  retained?: ExpressionReview,
 ): Promise<ModelingResult> {
   let model = result.model
-  const review: ExpressionReview = {
+  const review: ExpressionReview = retained ? structuredClone(retained) : {
     status: 'checking',
     snapshots: [{ model }],
     selectedSnapshot: 0,
     changes: [],
     warnings: [],
   }
-  const publish = () =>
+  const originalIndex = review.selectedSnapshot
+  if (retained) review.warnings = []
+  review.status = 'checking'
+  review.lineage = {
+    narrativeVersion: artifactVersion(narrative), planVersion: artifactVersion(result.semanticPlan),
+    compiledModelVersion: retained?.lineage?.compiledModelVersion || artifactVersion(result.model),
+    candidateVersion: artifactVersion(model),
+  }
+  const repairable = (item: import('../../shared/expression.ts').ExpressionCase) =>
+    item.status === 'defect' && (!item.repairTarget || item.repairTarget === 'model')
+  const statusFor = (check: import('../../shared/expression.ts').ExpressionCheck): ExpressionReview['status'] =>
+    check.cases.some(repairable) ? 'repairing' :
+      check.cases.some(item => item.status !== 'expressed') || check.clarifications.length || check.warnings.length ? 'issues' : 'passed'
+  const seeds: ExpressionBaseline | undefined = result.semantic?.scenarios?.length ? {
+    cases: result.semantic.scenarios.map(item => ({
+      id: item.id, fact: item.statement, scenario: `${item.scenario}\n需保留的区别：${item.distinction}`,
+      factIds: item.factIds,
+      basis: (() => {
+        const sources = [...new Set(item.factIds.map(id => result.semantic!.facts.find(f => f.id === id)!.source))]
+        return sources.length === 1 ? sources[0] : sources.map(source => `“${source}”`).join('；')
+      })(),
+    })),
+  } : undefined
+  const publish = () => {
+    review.lineage!.candidateVersion = artifactVersion(model)
     options.onEvent?.({
       type: 'model-checkpoint',
       model,
       expressionReview: structuredClone(review),
     })
+  }
   const phase = (part: 'expression' | 'repair' | 'recheck', text: string) => {
     options.signal?.throwIfAborted()
     options.onEvent?.({ type: 'phase', part, text })
@@ -82,17 +128,20 @@ export async function checkAndRepair(
   publish()
   try {
     phase('expression', '检查候选模型能否表达具体业务事实。')
-    const first = await runExpressionCheck(narrative, model, runTurn, options)
+    const baseline = retained?.snapshots.slice(0, retained.selectedSnapshot + 1).reverse().find(snapshot => snapshot.check)?.check || seeds
+    const first = await runExpressionCheck(
+      narrative,
+      model,
+      runTurn,
+      options,
+      baseline,
+      result.semantic,
+      retained ? 'recheck' : 'initial',
+    )
     options.signal?.throwIfAborted()
-    review.snapshots[0].check = first
+    review.snapshots[originalIndex].check = first
     review.warnings.push(...first.warnings)
-    review.status = first.cases.some((item) => item.status === 'defect')
-      ? 'repairing'
-      : first.cases.some((item) => item.status === 'uncertain') ||
-          first.clarifications.length ||
-          first.warnings.length
-        ? 'issues'
-        : 'passed'
+    review.status = statusFor(first)
     publish()
     // Keep the semantic gate closed until a candidate passes a complete
     // check. A bounded loop lets the checker repair more than one defect
@@ -133,6 +182,7 @@ export async function checkAndRepair(
         review.warnings.push('未产生有效修正，已保留原候选与未解决缺陷。')
         break
       }
+      const previousIndex = review.selectedSnapshot
       model = repaired.model
       review.changes.push(...repaired.changes)
       review.snapshots.push({ model })
@@ -146,6 +196,7 @@ export async function checkAndRepair(
         runTurn,
         options,
         previousCheck,
+        result.semantic,
       )
       options.signal?.throwIfAborted()
       review.snapshots[review.snapshots.length - 1].check = next
@@ -157,22 +208,16 @@ export async function checkAndRepair(
             'expressed',
       )
       if (regressions.length) {
-        model = review.snapshots[0].model
-        review.selectedSnapshot = 0
+        model = review.snapshots[previousIndex].model
+        review.selectedSnapshot = previousIndex
         review.status = 'issues'
-          review.warnings.push(
-          `复查不再认可原先通过的业务事实（${regressions.map((item) => item.id).join('、')}），已恢复初始候选；不继续自动循环。`,
+        review.warnings.push(
+          `复查不再认可原先通过的业务事实（${regressions.map((item) => item.id).join('、')}），已恢复本轮修正前的候选；不继续自动循环。`,
         )
         break
       }
       previousCheck = next
-      review.status =
-        next.cases.some((item) => item.status === 'defect')
-          ? 'repairing'
-          : next.clarifications.length || next.warnings.length ||
-              next.cases.some((item) => item.status === 'uncertain')
-            ? 'issues'
-            : 'passed'
+      review.status = statusFor(next)
       publish()
     }
     if (review.status === 'repairing') {

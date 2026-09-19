@@ -10,6 +10,8 @@ import { validateDocument, requireText } from './document.ts'
 import { parseCandidateModel } from './model.ts'
 import { isRecord } from './values.ts'
 import type { SemanticPlanV2 } from '../../shared/semantic.ts'
+import { parseResumeResult } from './resume.ts'
+import { readUnderstandingReview } from '../../shared/workflow.ts'
 import { validateSemanticPlan } from './semantic.ts'
 
 export function parseAnalysisRequest(
@@ -43,6 +45,7 @@ export function parseAnalysisRequest(
         narrative: input.narrative,
         model: input.model,
         instruction: input.instruction,
+        understandingReview: readUnderstandingReview(input.understandingReview),
       }
     }
     case 'compile':
@@ -72,6 +75,10 @@ export function parseAnalysisRequest(
         stage: 'narrate',
         model: parseCandidateModel(input.model),
       }
+    case 'verify':
+    case 'map':
+      requireText(input.narrative, '业务说明')
+      return { provider, ...(runtime ? { runtime } : {}), stage: stage === 'verify' ? 'verify' : 'map', narrative: input.narrative, result: parseResumeResult(input.result, input.narrative) }
     case 'assess':
       return {
         provider,

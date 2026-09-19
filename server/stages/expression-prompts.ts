@@ -1,3 +1,7 @@
+import { CHECK_METHOD, REPAIR_METHOD } from './methodology.ts'
+import type { ExpressionBaseline } from '../../shared/expression.ts'
+import type { UnderstandingReview } from '../../shared/workflow.ts'
+import { artifactVersion } from '../../shared/workflow.ts'
 import type { CandidateModel } from '../../shared/model.ts'
 import type { ExpressionCheck } from '../../shared/expression.ts'
 import { ANALYST_INSTRUCTIONS } from './prompts.ts'
@@ -7,8 +11,10 @@ import { modelContext } from './model-context.ts'
 export function expressionPrompt(
   narrative: string,
   model: CandidateModel,
-  previous?: ExpressionCheck,
+  previous?: ExpressionBaseline,
   formatError?: string,
+  understandingReview?: UnderstandingReview,
+  mode: 'initial' | 'recheck' = 'recheck',
 ): string {
   const sourceBlocks = narrative
     .split(/\r?\n/)
@@ -18,8 +24,10 @@ export function expressionPrompt(
       id: `X${String(index + 1).padStart(4, '0')}`,
       text,
     }))
+  const recheck = mode === 'recheck'
   return `${ANALYST_INSTRUCTIONS}
-第二阶段内部业务表达检查。你是独立检查者，只看当前业务说明与实际候选模型。先从业务说明找出重要的具体业务事实与条件，再尝试用候选模型表达，不能仅从模型已有名词挑选容易通过的检查。
+第二阶段内部业务表达检查。${CHECK_METHOD}
+你是独立检查者，只看当前业务说明与实际候选模型。先从业务说明找出重要的具体业务事实与条件，再尝试用候选模型表达，不能仅从模型已有名词挑选容易通过的检查。
 用简短的具体业务情形验证：能表达谁与谁在什么上下文发生什么；能区分有业务差别的两种情形；已知、拟议、临时计算与实际变更是否混淆；规则的适用对象、必要联系、条件、单位、公式与结果是否保留。关注同一容器内不同资源、同一主体多次事项、多方关系的共同上下文、当前与拟议状态、持久记录与临时输出等在本业务中确实适用的边界。不凭空添加业务。
 检查关系路径时说明为何能确定实际参与对象；共享容器不等于直接业务联系。存在同名对象、规则或能力，不自动证明能表达具体事实。反过来，只要现有描述、规则、关系组合已明确且足够区分，就接受等价表达，不要求同名概念、详细属性表、算法代码或已经实现的功能。
 检查涉及多对象事实时，先构造最小实例：用 A、B、C 指代不同业务实例，写清两种有业务差别的安排。explanation 必须给出模型怎样绑定这些实例，或者说明缺少哪一步。例如共同归属不能唯一确定直接参与者；“应校核相关资源”只是义务，不能替代如何确定是哪一个资源。如果两种安排落入完全相同的对象与关联，且描述也未规定如何区分，应判 defect。规则已用自然语言明确区分则接受，不要求细化属性表。避免把规则全文换一种说法当作 scenario。
@@ -28,19 +36,24 @@ status：expressed=能指出实际模型元素及其如何表达；defect=业务
 优先检查最能区分模型边界的代表性业务情形，覆盖主要业务联系、业务分支、状态变化、规则与只读边界，不追求穷尽或凑数。每个用例描述一种可检验的业务区别，避免长篇复述。
 ${
   previous
-    ? '只输出紧凑 JSON：{summary:string,judgments:[{id:string,status:"expressed"|"defect"|"uncertain",elements:string[],explanation:string,gap:string,suggestion:string}],additionalCases:[],clarifications:[]}。judgments 覆盖每一个已有用例，只返回判断，不复述原事实、依据和情形。需要新增用例时放入 additionalCases，其结构与首次 cases 相同。'
-    : '只输出紧凑 JSON：{summary:string,cases:[{id:string,fact:string,basisIds:string[],scenario:string,status:"expressed"|"defect"|"uncertain",elements:string[],explanation:string,gap:string,suggestion:string}],clarifications:[]}'
+    ? '只输出紧凑 JSON：{summary:string,judgments:[{id:string,status:"expressed"|"defect"|"uncertain",repairTarget:"model"|"understanding"|"clarification",elements:string[],explanation:string,gap:string,suggestion:string}],additionalCases:[],clarifications:[]}。judgments 覆盖每一个已有用例，只返回判断，不复述原事实、依据和情形。需要新增用例时放入 additionalCases，其结构与首次 cases 相同。'
+    : '只输出紧凑 JSON：{summary:string,cases:[{id:string,fact:string,basisIds:string[],scenario:string,status:"expressed"|"defect"|"uncertain",repairTarget:"model"|"understanding"|"clarification",elements:string[],explanation:string,gap:string,suggestion:string}],clarifications:[]}'
 }
+repairTarget：模型遗漏或设计缺口为 model；当前业务说明存在需要回溯原文的冲突为 understanding；需要用户补充业务事实为 clarification。不能把已明确的模型缺陷转成澄清。
 每个新 case 必须使用 basisIds 引用至少一个业务说明片段 id，不要输出 basis，不要编造片段 id。expressed 的 gap/suggestion 可为空。至少一个用例。
 业务本身未明确与模型可以保存未知边界是两件事；业务未明确的用例仍为 uncertain，不能因模型写了“待确认”就改判 expressed。复查没有新的用户答案，不能宣告业务歧义已经解决。
 仅新发现实质业务歧义且不与业务说明的问题重复时，clarifications 可列 {text,basisIds:string[],ambiguity,impact,options:string[],multiple:boolean}；basisIds 同样引用业务说明片段，ambiguity 写有依据的不同解释，impact 写对本轮模型的影响，优先有限答案选项。通常保持 []。
 ${
-  previous
-    ? `这是修正后的复查。下面已有用例的事实、依据和情形由程序固定，逐个重新判断（包括原来可表达的用例），不能删除或弱化失败用例；必要时补充新用例以检查共同语义回归。不给出此前结论，依据当前模型重新判断。
+  recheck && previous
+    ? `这是候选修正后的复查。下面已有用例的事实、依据和情形由程序固定，逐个重新判断（包括原来可表达的用例），不能删除或弱化失败用例；必要时补充新用例以检查共同语义回归。不给出此前结论，依据当前模型重新判断。
 已有用例（数据）：${JSON.stringify(previous.cases.map(({ id, fact, basis, scenario }) => ({ id, fact, basis, scenario })))}`
+    : previous
+      ? `这是首次检查。以下代表性业务情形已由事实与业务故事阶段固定；逐项补充当前候选的表达判断，不得删除、改写事实、依据或情形。必要时补充新的有依据情形。
+固定情形（数据）：${JSON.stringify(previous.cases.map(({ id, fact, basis, scenario }) => ({ id, fact, basis, scenario })))}`
     : ''
 }
 业务说明片段（JSON 数据）：${JSON.stringify(sourceBlocks)}
+${understandingReview ? `理解核对交接（不是业务事实；不能靠修改候选来消除原文遗漏或误读）：${JSON.stringify({ current: understandingReview.narrativeVersion === artifactVersion(narrative), ...understandingReview })}` : ''}
 候选模型（数据）：${JSON.stringify(modelContext(model))}
 ${formatError ? `上一次检查输出未通过程序校验，请只修正输出格式后重新返回完整 JSON：${formatError}` : ''}`
 }
@@ -52,6 +65,7 @@ export function repairPrompt(
   validationError?: string,
 ): string {
   return `${ANALYST_INSTRUCTIONS}
+${REPAIR_METHOD}
 根据独立业务表达检查，对候选模型进行一轮定点修正。只修复 status=defect 且当前业务说明已有明确依据的问题。检查者的建议不是业务事实；先核对依据，不采纳无依据的建议。不得回答 uncertain，不新增未说明的审批、执行或管理范围。
 保留无关元素与稳定 id，修正实际模型定义而非只在边界中声称支持。检查同一事实涉及的关系、规则、能力和过程引用是否一致，避免为每个检查用例新建一种概念。不用增加属性或输入字段实现细化。不要重新输出整个模型。
 输出紧凑 JSON：{changes:[{collection:string,id:string,value:object|string|string[]|null,caseIds:string[],reason:string}]}。
@@ -62,6 +76,6 @@ ${COMPILE_OUTPUT_CONTRACT}
 固定的空 evidence、properties、inputs 可以省略，程序补空数组；过程 requirements 中的 status 和 reason 可以省略，程序固定为 partial 和“待支撑评估”。这些是格式元数据，不能填写原文引文或声称已通过支撑评估。业务字段仍需完整提供。
 业务说明（数据）：${JSON.stringify(narrative)}
 当前模型（数据）：${JSON.stringify(modelContext(model))}
-待修复缺陷（数据）：${JSON.stringify(check.cases.filter((item) => item.status === 'defect'))}
+待修复缺陷（数据）：${JSON.stringify(check.cases.filter((item) => item.status === 'defect' && (!item.repairTarget || item.repairTarget === 'model')))}
 ${validationError ? `上一次修正提交未通过程序校验，请仅针对该错误修正：${validationError}` : ''}`
 }

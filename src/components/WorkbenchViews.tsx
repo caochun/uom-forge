@@ -315,6 +315,15 @@ export function CandidateView({
         </div>
       </div>
       {mode === 'evidence' ? (
+        <>
+        {!!plan?.semantic?.scenarios?.length && <details className="panel-surface narrative-body">
+          <summary>代表性业务情形 · {plan.semantic.scenarios.length} 项</summary>
+          <p className="muted">候选生成前形成的检验材料，用于建模与表达检查；情形中的假设实例不是新增业务事实。</p>
+          {plan.semantic.scenarios.map(item => <article className="reading-note" key={item.id}>
+            <strong>{item.statement}</strong><p>{item.scenario}</p><p>{item.distinction}</p>
+            <small>依据事实：{item.factIds.join('、')}</small>
+          </article>)}
+        </details>}
         <SemanticEvidence
           semantic={plan?.semantic}
           sources={plan?.basis?.sources}
@@ -328,6 +337,7 @@ export function CandidateView({
           onMode={onEvidenceMode}
           onSelectElement={select}
         />
+        </>
       ) : mode === 'decisions' ? (
         <article className="panel-surface reading-narrative">
           <div className="panel-toolbar">

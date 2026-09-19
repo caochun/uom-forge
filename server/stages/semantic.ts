@@ -1,3 +1,5 @@
+import { artifactVersion } from '../../shared/workflow.ts'
+import type { ExpressionReview } from '../../shared/expression.ts'
 import type { RunTurn } from '../providers/types.ts'
 import type { StageOptions } from './contracts.ts'
 import { scopedTurn } from './contracts.ts'
@@ -10,6 +12,7 @@ import { modelContext } from './model-context.ts'
 import type {
   BusinessFact,
   BusinessStory,
+  BusinessScenario,
   ElementMapping,
   SemanticPlanV2,
 } from '../../shared/semantic.ts'
@@ -203,11 +206,11 @@ export async function extractFacts(
   return (await extractFactPreparation(narrative, runTurn, options)).facts
 }
 
-export async function organizeStories(
+export async function organizeBusinessContext(
   facts: BusinessFact[],
   runTurn: RunTurn,
   options: StageOptions = {},
-): Promise<BusinessStory[]> {
+): Promise<{ stories: BusinessStory[]; scenarios: BusinessScenario[] }> {
   const knownFactIds = new Set(facts.map((fact) => fact.id))
   const parseStories = (raw: string): BusinessStory[] => {
     const root = objectJson(raw, '业务故事')
@@ -287,7 +290,7 @@ export async function organizeStories(
   let formatError = ''
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await runTurn(
-      `把以下已经提取的业务事实组织成业务故事。不得创造事实；每一步必须引用 factIds；故事的 factIds 必须包含其全部步骤引用的事实。只输出一个 JSON 对象：{"stories":[{"id","name","goal","factIds":[],"steps":[{"order","actor","action","object","condition","result","factIds":[]}]}]}。
+      `把以下已经提取的业务事实组织成业务故事。不得创造事实；每一步必须引用 factIds；故事的 factIds 必须包含其全部步骤引用的事实。同时根据事实选择少量可检验的代表性情形 scenarios，每项包含 id、factIds、statement（要检验的业务事实）、scenario（具体情形）、distinction（需要保留的区别）。没有候选模型输入，不预设对象设计。情形是检验材料而非新增事实，引用只能来自输入 facts。只在业务需要时构造重复发生或不同配对，不机械套场景。只输出一个 JSON 对象，除 stories 外必须包含 scenarios 数组：{"stories":[{"id","name","goal","factIds":[],"steps":[{"order","actor","action","object","condition","result","factIds":[]}]}]}。
 ${formatError ? `上次结果未通过程序校验：${formatError}\n请只修正 JSON 结构、步骤顺序或事实引用后重新提交。\n` : ''}事实：${JSON.stringify(facts)}`,
       { ...scopedTurn(options, 'semantic'), outputFormat: 'json' },
     )
@@ -296,7 +299,19 @@ ${formatError ? `上次结果未通过程序校验：${formatError}\n请只修�
       // Keep aggregate checks inside the retry boundary too (e.g. duplicate
       // story ids). A successful parse must satisfy the published contract.
       validateSemanticPlan({ schemaVersion: '2', status: 'stories', facts, stories, mappings: [], boundaries: [], clarifications: [] })
-      return stories
+      const value = objectJson(raw, '业务故事')
+      // Older providers/drafts may return stories alone. Their explicit steps
+      // still form a grounded replay; do not invent facts to fill a scenario.
+      const scenarios = value.scenarios === undefined
+        ? stories.map(story => ({
+            id: `scenario-${story.id}`, factIds: story.factIds,
+            statement: story.goal,
+            scenario: story.steps.map(step => `${step.actor}${step.action}${step.object}${step.condition ? `（条件：${step.condition}）` : ''}${step.result ? `，结果：${step.result}` : ''}`).join('；'),
+            distinction: '保留该过程各步骤的参与者、前提、结果及共同事项归属。',
+          }))
+        : value.scenarios as BusinessScenario[]
+      validateSemanticPlan({ schemaVersion: '2', status: 'stories', facts, stories, scenarios, mappings: [], boundaries: [], clarifications: [] })
+      return { stories, scenarios }
     } catch (error) {
       formatError = error instanceof Error ? error.message : String(error)
       if (attempt === 1) throw error
@@ -309,6 +324,10 @@ ${formatError ? `上次结果未通过程序校验：${formatError}\n请只修�
     options.signal?.throwIfAborted()
   }
   throw new Error('业务故事未返回有效结果。')
+}
+
+export async function organizeStories(facts: BusinessFact[], runTurn: RunTurn, options: StageOptions = {}): Promise<BusinessStory[]> {
+  return (await organizeBusinessContext(facts, runTurn, options)).stories
 }
 
 export async function mapFactsToElements(
@@ -396,8 +415,8 @@ export async function mapFactsToElements(
   let formatError = ''
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await runTurn(
-      `将事实和业务故事映射到已经编译的候选领域模型元素。只能使用候选模型中真实存在的 id；每条映射的 elementIds 必须属于同一种 mappingType，不同类型必须拆成多条映射。每个事实至少给出一条映射，无法支撑时使用空 elementIds 和 coverage=missing。只输出一个 JSON 对象：{"mappings":[{"factId","elementIds":[],"mappingType":"object|relation|action|function|rule|activity","explanation","coverage":"full|partial|missing"}]}。
-${formatError ? `上次结果未通过程序校验：${formatError}\n请只修正元素 id、映射类型或覆盖结论后重新提交。\n` : ''}事实：${JSON.stringify(facts)}
+      `将业务事实映射到已经编译的候选领域模型元素。业务故事仅提供上下文，factId 只能引用 facts 的 id，不能填写故事或情形 id。只能使用候选模型中真实存在的 id；每条映射的 elementIds 必须属于同一种 mappingType，不同类型必须拆成多条映射。每个事实至少给出一条映射，无法支撑时使用空 elementIds 和 coverage=missing。只输出一个 JSON 对象：{"mappings":[{"factId","elementIds":[],"mappingType":"object|relation|action|function|rule|activity","explanation","coverage":"full|partial|missing"}]}。
+${formatError ? `上次结果未通过程序校验：${formatError}\n请修正未知 factId、元素 id、映射类型或覆盖结论；合法 factId 为 ${facts.map(f => f.id).join("、")}。\n` : ''}事实：${JSON.stringify(facts)}
 业务故事：${JSON.stringify(stories)}
 候选模型：${JSON.stringify(modelContext(model))}`,
       { ...scopedTurn(options, 'semantic'), outputFormat: 'json' },
@@ -442,18 +461,19 @@ export async function buildSemanticPreparation(
   const extracted = await extractFactPreparation(narrative, runTurn, internalOptions)
   const facts = extracted.facts
   const factSnapshot = validateSemanticPlan(
-    { schemaVersion: '2', status: 'facts', facts, stories: [], mappings: [], boundaries: [], clarifications: extracted.clarifications },
+    { schemaVersion: '2', status: 'facts', narrativeVersion: artifactVersion(narrative), facts, stories: [], mappings: [], boundaries: [], clarifications: extracted.clarifications },
     narrative,
   )
   options.onEvent?.({ type: 'semantic-plan', part: 'semantic', semantic: factSnapshot })
   options.onEvent?.({ type: 'phase', part: 'semantic', text: '正在组织业务故事与过程。' })
-  const stories = await organizeStories(facts, runTurn, internalOptions)
+  const { stories, scenarios } = await organizeBusinessContext(facts, runTurn, internalOptions)
   const storySnapshot = validateSemanticPlan(
     {
       ...factSnapshot,
       schemaVersion: '2',
       status: 'stories',
       stories,
+      scenarios,
       mappings: [],
     },
     narrative,
@@ -469,8 +489,9 @@ export async function mapSemanticPlan(
   runTurn: RunTurn,
   narrative: string,
   options: StageOptions = {},
+  review?: ExpressionReview,
 ): Promise<SemanticPlanV2> {
-  options.onEvent?.({ type: 'phase', part: 'semantic', text: '正在建立事实到模型元素的映射。' })
+  options.onEvent?.({ type: 'phase', part: 'mapping', text: '正在建立事实到模型元素的映射。' })
   const mappings = await mapFactsToElements(
     prepared.facts,
     prepared.stories,
@@ -478,8 +499,17 @@ export async function mapSemanticPlan(
     runTurn,
     semanticOptions(options),
   )
+  const unresolved = new Set(review?.snapshots[review.selectedSnapshot]?.check?.cases
+    .filter(item => item.status !== 'expressed').flatMap(item => item.factIds || []) || [])
+  for (const mapping of mappings) {
+    if (mapping.coverage === 'full' && (unresolved.has(mapping.factId) ||
+      prepared.facts.find(f => f.id === mapping.factId)?.certainty === 'uncertain')) {
+      mapping.coverage = 'partial'
+      mapping.explanation += ' 该事实仍有未决业务含义或表达缺口，元素对应不代表已完整验证。'
+    }
+  }
   const mapped = validateSemanticPlan(
-    { ...prepared, schemaVersion: '2', status: 'mapped', mappings },
+    { ...prepared, schemaVersion: '2', status: 'mapped', mappedModelVersion: model ? artifactVersion(model) : undefined, mappings },
     narrative,
     model,
   )

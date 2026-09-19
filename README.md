@@ -125,15 +125,16 @@ npm run dev
 The DeepSeek provider uses `LLM_API_URL`, `LLM_API_KEY` and `LLM_MODEL`;
 the GPT provider uses `GPT_API_URL`, `GPT_API_KEY` and `GPT_MODEL`; the Qwen
 provider uses `QWEN_API_URL`, `QWEN_API_KEY` and `QWEN_MODEL`.
-All three use streaming Chat Completions over HTTP and expose the same staged
+GLM uses `GLM_API_KEY`, with optional `GLM_API_URL` and `GLM_MODEL`.
+All four use streaming Chat Completions over HTTP and expose the same staged
 interface and return the same validated provider-neutral model containing objects,
 relations, actions, functions, rules, activities, boundaries and textual evidence.
 `/api/discuss` uses the selected provider through the same interface.
 
-The UI and shared protocol constants default to DeepSeek and the Pi Agent runtime. Users
+The UI and shared protocol constants default to GLM and the Pi Agent runtime. Users
 can switch provider or runtime for the current session. Previously saved provider
 preferences do not override this default. The server and command-line provider resolver
-also default to DeepSeek. Set `UOM_LLM_PROVIDER=deepseek`, `gpt` or `qwen` to override
+also default to GLM. Set `UOM_LLM_PROVIDER=deepseek`, `gpt`, `qwen` or `glm` to override
 the provider default; the server uses Pi when a request selects it or when
 `UOM_AGENT_RUNTIME=pi` is set.
 an explicit request or `--provider` choice takes precedence.
@@ -148,6 +149,25 @@ validation; partial JSON is never accepted as a model.
 Qwen uses `QWEN_MAX_OUTPUT_TOKENS` (default `16384`) and does not send provider-
 specific reasoning parameters, so the endpoint can remain a standard
 OpenAI-compatible Chat Completions service.
+
+GLM defaults to `glm-5.3-flash` at `https://open.bigmodel.cn/api/coding/paas/v4`;
+`GLM_API_KEY` is required in the project root `.env`. Standard API keys can
+override the endpoint with `GLM_API_URL=https://open.bigmodel.cn/api/paas/v4`.
+Coding Plan quota is separate from standard API balance. See the [Coding Plan setup guide](https://docs.bigmodel.cn/cn/coding-plan/quick-start)
+for key creation and supported tools, including Pi Coding Agent.
+`GLM_API_URL` also accepts the full `/chat/completions` endpoint. `GLM_MODEL` can select
+`glm-5.3-flashx`. Both direct calls and all Pi agents use
+`GLM_REASONING_EFFORT=max` (allowed: `low`, `high`, `max`) and
+`GLM_MAX_OUTPUT_TOKENS=32768` (up to `131072`). `GLM_API_TIMEOUT_MS` controls
+direct requests (default `300000`); `UOM_PI_TIMEOUT_MS` controls each Pi loop.
+GLM-5.3-Flash requires thinking: requests use `thinking.type=enabled` and
+`clear_thinking=false`, and Pi returns the original `reasoning_content` after
+tool calls. Tool arguments stream with `tool_stream=true`; GLM supports only
+`tool_choice=auto`, including handoff retries. Sampling uses the documented
+`temperature=1` and `top_p=0.95`. JSON stages still use `json_object` output.
+See the [GLM model documentation](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)
+and [thinking mode requirements](https://docs.bigmodel.cn/cn/guide/capabilities/thinking-mode).
+The current document workflow supplies text; this integration does not add image uploads.
 
 GPT uses the configured model (default `gpt-6-astra`) with
 `GPT_REASONING_EFFORT=medium` by default. It sends `reasoning_effort` and does not

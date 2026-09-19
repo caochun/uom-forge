@@ -35,7 +35,7 @@ const { values } = parseArgs({
 })
 if (Boolean(values.input) === Boolean(values['semantic-plan']))
   throw new Error(
-    'Specify --input input.json OR --semantic-plan plan.md [--provider deepseek|gpt|qwen]',
+    'Specify --input input.json OR --semantic-plan plan.md [--provider deepseek|gpt|qwen|glm]',
   )
 if (values.semantic && !values['semantic-plan'])
   throw new Error('--semantic requires --semantic-plan.')

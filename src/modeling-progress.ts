@@ -1,3 +1,4 @@
+import { artifactVersion } from '../shared/workflow.ts'
 import type { StagePart } from '../shared/analysis.ts'
 import type { ElementMapping } from '../shared/semantic.ts'
 import type {
@@ -61,7 +62,8 @@ export function modelingProgress({
   const oldCandidate = Boolean(
     candidate && (!currentCandidate || candidateStale),
   )
-  const reviewStale = oldCandidate || Boolean(candidate?.edited)
+  const reviewStale = oldCandidate || Boolean(candidate?.edited) || Boolean(candidate?.expressionReview?.lineage && candidate.expressionReview.lineage.candidateVersion !== artifactVersion(candidate.model))
+  const mappingStale = reviewStale || Boolean(semantic?.mappedModelVersion && candidate && semantic.mappedModelVersion !== artifactVersion(candidate.model))
   const review = currentCandidate ? candidate?.expressionReview : undefined
   const remaining =
     review?.snapshots[review.selectedSnapshot]?.check?.cases.filter(
@@ -79,7 +81,7 @@ export function modelingProgress({
       : null
   const active: ModelingStep | undefined = !runningPart
     ? undefined
-    : runningPart === 'compile'
+    : runningPart === 'mapping' ? 'mapping' : runningPart === 'compile'
       ? 'compile'
       : ['expression', 'repair', 'recheck'].includes(runningPart)
         ? 'expression'
@@ -160,14 +162,14 @@ export function modelingProgress({
       tab: 'evidence',
       label: '事实覆盖',
       detail: counts
-        ? reviewStale
+        ? mappingStale
           ? '覆盖需要更新'
           : `完整 ${counts.full} · 部分 ${counts.partial} · 缺失 ${counts.missing}`
         : currentCandidate && semantic && !runningPart
           ? '映射未完成'
           : '等待映射',
       state: counts
-        ? reviewStale
+        ? mappingStale
           ? 'stale'
           : counts.partial || counts.missing
             ? 'attention'
@@ -236,15 +238,10 @@ export function modelingProgress({
 // A compilation retry belongs to the latest run; a later full rebuild must
 // not include timings left over from an earlier retry.
 export function latestModelTimings(
-  timings: Partial<Record<'model' | 'compile', StageTiming[]>>,
+  timings: Partial<Record<'model' | 'compile' | 'verify' | 'map', StageTiming[]>>,
 ) {
-  const model = timings.model || []
-  const compile = timings.compile || []
-  if (!compile.length) return model
-  if (!model.length) return compile
-  return Date.parse(compile[0].startedAt) > Date.parse(model[0].startedAt)
-    ? compile
-    : model
+  const runs = [timings.model, timings.compile, timings.verify, timings.map].filter((items): items is StageTiming[] => Boolean(items?.length))
+  return runs.sort((a, b) => Date.parse(b[0].startedAt) - Date.parse(a[0].startedAt))[0] || []
 }
 
 export function prepareCompilationRetry(plan: SemanticPlan): SemanticPlan {
@@ -258,6 +255,7 @@ export function prepareCompilationRetry(plan: SemanticPlan): SemanticPlan {
             ...plan.semantic,
             status: plan.semantic.status === 'facts' ? 'facts' : 'stories',
             mappings: [],
+            mappedModelVersion: undefined,
           },
         }
       : {}),

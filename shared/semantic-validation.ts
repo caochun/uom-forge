@@ -1,6 +1,7 @@
 import type { SemanticPlanV2 } from './semantic.ts'
 import type { CandidateModel } from './model.ts'
 import { containsBasis, questionKey } from './clarifications.ts'
+import { artifactVersion, readUnderstandingReview } from './workflow.ts'
 
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -35,6 +36,10 @@ export function validateSemanticPlan(
     throw new Error('语义计划状态无效。')
 
   const factIds = new Set<string>()
+  if (raw.narrativeVersion !== undefined && (typeof raw.narrativeVersion !== 'string' ||
+    (narrative !== undefined && raw.narrativeVersion !== artifactVersion(narrative))))
+    throw new Error('语义计划的业务依据已变化，请重新准备事实与情形。')
+  readUnderstandingReview(raw.understandingReview)
   for (const [index, fact] of raw.facts.entries()) {
     if (!record(fact)) throw new Error(`业务事实第 ${index + 1} 项不是对象。`)
     if (!text(fact.id)) throw new Error(`业务事实第 ${index + 1} 项缺少 id。`)
@@ -85,6 +90,20 @@ export function validateSemanticPlan(
     object: 'objects', relation: 'relations', action: 'actions',
     function: 'functions', rule: 'rules', activity: 'activities',
   } as const
+  if (raw.scenarios !== undefined) {
+    if (!Array.isArray(raw.scenarios)) throw new Error('代表性情形必须是数组。')
+    const scenarioIds = new Set<string>()
+    for (const item of raw.scenarios) {
+      if (!record(item) || !text(item.id) || scenarioIds.has(item.id) ||
+        !text(item.statement) || !text(item.scenario) || !text(item.distinction) ||
+        !strings(item.factIds) || !item.factIds.length || !unique(item.factIds) ||
+        item.factIds.some(id => !factIds.has(id))) throw new Error('代表性情形无效、重复或引用未知事实。')
+      scenarioIds.add(item.id)
+    }
+  }
+  if (raw.mappedModelVersion !== undefined && (typeof raw.mappedModelVersion !== 'string' ||
+    (model && status === 'mapped' && raw.mappedModelVersion !== artifactVersion(model))))
+    throw new Error('事实映射对应旧候选，请重新建立映射。')
   const elementTypes = new Map<string, string>()
   if (model)
     for (const [type, collection] of Object.entries(collections))

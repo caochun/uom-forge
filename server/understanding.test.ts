@@ -11,7 +11,7 @@ const document = {
 const narrative =
   '# 业务概述\n\n申请满足条件时可以处理，否则继续保留。\n\n## 待确认问题\n\n1. 是否需要复核？\n   选项：需要；不需要\n2. 请补充责任人。\n'
 
-test('reads once, publishes the narrative and extracts optional questions', async () => {
+test('reads, independently reviews, publishes the narrative and extracts optional questions', async () => {
   const events: StageEvent[] = []
   const prompts: string[] = []
   const result = await readBusiness(
@@ -19,6 +19,7 @@ test('reads once, publishes the narrative and extracts optional questions', asyn
     async (prompt, options) => {
       prompts.push(prompt)
       assert.equal(options.provider, 'gpt')
+      if (prompt.includes('独立业务理解核对者')) return JSON.stringify({ coverage: [{ id: 'b1', status: 'complete', note: '已核对' }], additions: [] })
       assert.ok(prompt.includes('DOC_ONLY_37'))
       assert.doesNotMatch(
         prompt,
@@ -33,7 +34,8 @@ test('reads once, publishes the narrative and extracts optional questions', asyn
     },
     { provider: 'gpt', onEvent: (event) => events.push(event) },
   )
-  assert.equal(prompts.length, 1)
+  assert.equal(prompts.length, 2)
+  assert.equal(result.understanding.review?.status, 'passed')
   assert.equal(result.understanding.narrative, narrative)
   assert.deepEqual(result.understanding.questions, [
     { text: '是否需要复核？', options: ['需要', '不需要'] },
@@ -79,6 +81,7 @@ test('understanding delivers validated paragraph references in both SSE and the 
   const events: StageEvent[] = []
   const result = await readBusiness(document, async (prompt) => {
     assert.match(prompt, /"id":"b1"/)
+    if (prompt.includes('独立业务理解核对者')) return JSON.stringify({ coverage: [{ id: 'b1', status: 'complete', note: '已核对' }], additions: [] })
     assert.match(prompt, /\[\[source:/)
     return '## 业务概述\n\n业务说明中的转述。 [[source:b1]]'
   }, { runtime: 'direct', onEvent: (event) => events.push(event) })

@@ -10,6 +10,7 @@ import { withoutQuestionSection } from '../../shared/questions.ts'
 import { answerText, sameAnswer } from '../understanding.ts'
 import { stripSourceMarkers } from '../../shared/understanding-sources.ts'
 import { SourceCatalogue } from './SourceReferences.tsx'
+import { artifactVersion } from '../../shared/workflow.ts'
 
 interface Props {
   understanding: ReviewedUnderstanding | null
@@ -100,6 +101,24 @@ export default function BusinessUnderstanding({
             </ul>
           </div>
         </div>
+      )}
+      {!isLive && understanding?.review && (
+        <details className="panel-surface narrative-body" open={understanding.review.status !== 'passed'}>
+          <summary>业务理解核对 · {understanding.review.narrativeVersion !== artifactVersion(understanding.narrative)
+            ? '说明已更新，以下结论来自修改前'
+            : understanding.review.status === 'passed' ? '本轮未发现差异'
+              : understanding.review.status === 'issues' ? '仍有差异待核对' : '核对未完成'}</summary>
+          <p className="muted">核对原文遗漏、无依据新增和冲突；后续建模会保留这些提示。</p>
+          {understanding.review.findings.map((item, index) => (
+            <article key={index} className="reading-note">
+              <strong>{item.kind === 'omission' ? '原文遗漏' : item.kind === 'unsupported' ? '新增解释缺少依据' : '含义冲突'}</strong>
+              <p>{item.note}</p>
+              {item.passage && <blockquote>{item.passage}</blockquote>}
+              {item.blockIds.map(id => <blockquote key={id}>{understanding.sources?.blocks.find(b => b.id === id)?.text || id}</blockquote>)}
+            </article>
+          ))}
+          {understanding.review.warnings.map((warning, index) => <p key={index}>{warning}</p>)}
+        </details>
       )}
       {questions.length > 0 && (
         <div className="questions-panel panel-surface" id="business-questions">

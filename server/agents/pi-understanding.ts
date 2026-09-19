@@ -1,11 +1,12 @@
+import { reviewUnderstanding } from '../stages/understanding-review.ts'
+import { READING_METHOD } from '../stages/methodology.ts'
 import { Agent, type AgentTool } from '@earendil-works/pi-agent-core'
-import { Type, type AssistantMessageEvent, type Model } from '@earendil-works/pi-ai'
-import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions'
+import { Type, type AssistantMessageEvent } from '@earendil-works/pi-ai'
 import type { BusinessDocument, ProviderId } from '../../shared/analysis.ts'
 import type { StageOptions } from '../stages/contracts.ts'
 import type { RunTurn } from '../providers/types.ts'
 import { piSignal } from './runtime.ts'
-import { requireModelProviderConfig } from '../providers/model-config.ts'
+import { createPiModel, createPiStream, throwIfPiFailed } from '../providers/pi.ts'
 import { SOURCE_INSTRUCTIONS, stripSourceMarkers } from '../../shared/understanding-sources.ts'
 import {
   UNDERSTANDING_SECTIONS,
@@ -92,7 +93,7 @@ function gapFeedback(
   incomplete: { text: string; status: string; note: string }[],
   reviewOnly: boolean,
 ): string {
-  if (!incomplete.length) return '所有原文片段均已判断为完整覆盖。请调用 finish_understanding 提交刚才检查的完整文本。'
+  if (!incomplete.length) return '本轮理解核对未发现遗漏、无依据新增或冲突。请调用 finish_understanding 提交刚才检查的完整文本。'
   const shown = incomplete.slice(0, 12)
   const lines = shown.map(
     (item, index) =>
@@ -100,29 +101,13 @@ function gapFeedback(
   )
   const omitted = incomplete.length - shown.length
   return [
-    `发现 ${incomplete.length} 个原文片段未完整覆盖。`,
+    `发现 ${incomplete.length} 项理解差异或未完成检查。`,
     ...lines,
     ...(omitted > 0 ? [`另有 ${omitted} 个片段未在本次反馈中展开。`] : []),
     reviewOnly
       ? '已完成两次独立检查。请保留仍无法可靠整合的内容作为待复核边界，并立即调用 finish_understanding 提交刚才检查的完整文本。'
-      : '请针对上述原文补充业务理解，然后再检查一次。',
+      : '请核对上述差异，补充遗漏并纠正无依据解释，然后再检查一次。',
   ].join('\n')
-}
-
-function modelFor(provider: ProviderId, env: NodeJS.ProcessEnv): Model<'openai-completions'> {
-  const config = requireModelProviderConfig(provider, env)
-  return {
-    id: config.model,
-    name: config.model,
-    api: 'openai-completions',
-    provider: config.piProvider,
-    baseUrl: config.url!.replace(/\/chat\/completions\/?$/, ''),
-    reasoning: false,
-    input: ['text'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 24000,
-  }
 }
 
 function textFromEvent(event: AssistantMessageEvent): string | undefined {
@@ -145,7 +130,7 @@ export async function runPiUnderstanding(
 ): Promise<string> {
   const env = process.env
   const deadline = piSignal(options, 'Pi 业务理解')
-  const model = modelFor(provider, env)
+  const model = createPiModel(provider, env)
   let finished: string | undefined
   let checks = 0
   let turns = 0
@@ -197,8 +182,8 @@ export async function runPiUnderstanding(
   }
   const checkTool: AgentTool<typeof checkSchema> = {
     name: 'check_understanding',
-    label: '检查业务理解覆盖度',
-    description: '提交当前业务理解，由独立评估器逐个检查原文覆盖情况，并返回需要补充的原文片段。',
+    label: '核对业务理解',
+    description: '提交当前业务理解，由独立评估器核对原文遗漏、无依据新增和冲突，并返回具体差异。',
     parameters: checkSchema,
     execute: async (_id, args: CheckArgs) => {
       if (independentAttempts >= 2) {
@@ -215,11 +200,19 @@ export async function runPiUnderstanding(
       checks += 1
       checkedNarrative = args.narrative
       independentAttempts += 1
-      options.onEvent?.({ type: 'phase', part: 'reading', text: '正在由独立评估器逐块复核原文覆盖度。' })
-      const incomplete = await independentlyCheck(args.narrative, sourceBlocks, runTurn, provider, deadline.signal)
+      options.onEvent?.({ type: 'phase', part: 'reading', text: '正在核对原文事实是否保留，以及说明是否引入无依据解释。' })
+      const review = await reviewUnderstanding(args.narrative, sourceBlocks, runTurn, provider, deadline.signal)
+      options.onEvent?.({ type: 'understanding-review', review })
+      const incomplete = [
+        ...review.findings.map(item => ({
+          text: item.passage || item.blockIds.map(id => sourceBlocks.find(b => b.id === id)?.text || id).join('；'),
+          status: item.kind, note: item.note,
+        })),
+        ...review.warnings.map(note => ({ text: '核对未完成', status: 'incomplete', note })),
+      ]
       lastIndependentGaps = incomplete
-      coverageComplete = incomplete.length === 0
-      reviewOnly = incomplete.length > 0 && independentAttempts >= 2
+      coverageComplete = review.status === 'passed'
+      reviewOnly = !coverageComplete && independentAttempts >= 2
       return {
         content: [{
           type: 'text',
@@ -237,6 +230,7 @@ export async function runPiUnderstanding(
 先形成完整业务理解，调用 check_understanding 提交当前完整文本，由独立评估器逐个检查原文覆盖度；根据工具返回的原文缺口增量修正。最多检查两次：第二次检查后即使仍有待复核片段，也要保留边界并立即调用 finish_understanding 提交最后一次检查的完整文本，不要继续反复压缩或扩写。
 最终文本必须使用以下 Markdown 二级标题，并按每节要求组织内容：
 ${UNDERSTANDING_SECTION_INSTRUCTIONS}
+${READING_METHOD}
 ${SOURCE_INSTRUCTIONS}
 
 只记录文档明确内容、合理推断和待确认事项，三者必须区分；不要编造领域概念。业务过程用于说明业务如何展开，不等于模型对象；代表性业务事实用于后续检验，不是对象清单。
@@ -248,14 +242,7 @@ ${SOURCE_INSTRUCTIONS}
       thinkingLevel: 'minimal',
       tools: [checkTool, finishTool],
     },
-    streamFn: (streamModel, context, streamOptions) =>
-      streamSimple(streamModel as Model<'openai-completions'>, context, {
-        ...streamOptions,
-        ...(requireTool ? { toolChoice: 'required' as never } : {}),
-        ...(provider === 'deepseek' && requireTool ? { samplingParams: { ...(streamOptions?.samplingParams || {}), thinking: { type: 'disabled' } } } : {}),
-        apiKey: requireModelProviderConfig(provider, env).apiKey,
-        maxTokens: 24000,
-      }),
+    streamFn: createPiStream(provider, () => requireTool, env),
   })
   // Allow a repair/recheck pair after the independent critic. The previous
   // message-count guard could stop the agent before it reached submission on
@@ -271,7 +258,7 @@ ${SOURCE_INSTRUCTIONS}
         part: 'reading',
         text:
           event.toolName === 'check_understanding'
-            ? 'Pi Agent 正在检查业务理解覆盖度。'
+            ? 'Pi Agent 正在核对业务理解。'
             : event.toolName === 'finish_understanding'
               ? 'Pi Agent 正在提交业务理解。'
               : `Pi Agent 正在执行 ${event.toolName}。`,
@@ -280,9 +267,11 @@ ${SOURCE_INSTRUCTIONS}
     if (event.type === 'message_update') {
       const delta = textFromEvent(event.assistantMessageEvent)
       if (delta) emitDelta(options, delta)
+      if (provider === 'glm' && event.assistantMessageEvent.type === 'thinking_delta')
+        options.onEvent?.({ type: 'delta', text: event.assistantMessageEvent.delta, reasoning: true })
     }
     if (event.type === 'tool_execution_start') requireTool = false
-    if (event.type === 'turn_end' && event.message.role === 'assistant' && event.toolResults.length === 0 && !finished && !deliveryRetryQueued) {
+    if (event.type === 'turn_end' && event.message.role === 'assistant' && event.message.stopReason !== 'error' && event.message.stopReason !== 'aborted' && event.toolResults.length === 0 && !finished && !deliveryRetryQueued) {
       deliveryRetryQueued = true
       requireTool = true
       agent.followUp({ role: 'user', content: '你已经生成了业务理解。请不要再次直接输出正文，立即调用 finish_understanding，并将上一轮的完整业务理解原样放入 narrative 参数。', timestamp: Date.now() })
@@ -300,6 +289,7 @@ ${SOURCE_INSTRUCTIONS}
     deadline.dispose()
   }
   deadline.signal.throwIfAborted()
+  if (provider === 'glm') throwIfPiFailed(agent, provider, env)
   if (
     !finished?.trim() &&
     checks > 0 &&

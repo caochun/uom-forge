@@ -1,3 +1,5 @@
+import { reviewUnderstanding } from './understanding-review.ts'
+import { artifactVersion, type UnderstandingReview } from '../../shared/workflow.ts'
 import { validateDocument } from '../validation/document.ts'
 import { understandingPrompt, UNDERSTANDING_SECTIONS } from './prompts.ts'
 import type { BusinessDocument, Understanding } from '../../shared/analysis.ts'
@@ -35,8 +37,11 @@ export async function readBusiness(
   const usePi =
     options.runtime === 'pi' ||
     (options.runtime === undefined && process.env.UOM_AGENT_RUNTIME === 'pi')
+  let review: UnderstandingReview | undefined
   const narrative = usePi
-    ? await runPiUnderstanding(document, options.provider || 'gpt', runTurn, options)
+    ? await runPiUnderstanding(document, options.provider || 'gpt', runTurn, {
+        ...options, onEvent: event => { if (event.type === 'understanding-review') review = event.review; report(event) },
+      })
     : await runTurn(
         understandingPrompt(document),
         scopedTurn(options, 'reading'),
@@ -44,9 +49,16 @@ export async function readBusiness(
   options.signal?.throwIfAborted()
   if (!narrative.trim()) throw new Error('未返回业务说明，请重试。')
   const linked = extractUnderstandingSources(narrative, document)
+  if (!usePi) {
+    report({ type: 'phase', part: 'reading', text: '核对业务说明与原文的遗漏、新增和冲突。' })
+    review = await reviewUnderstanding(linked.narrative, document.blocks, runTurn, options.provider || 'gpt', options.signal)
+    report({ type: 'understanding-review', review })
+  }
+  if (review) review = { ...review, narrativeVersion: artifactVersion(linked.narrative) }
   const understanding: Understanding = {
     narrative: linked.narrative,
     sources: linked.sources,
+    review,
     questions: extractQuestions(linked.narrative),
     warnings: [...understandingWarnings(linked.narrative), ...linked.warnings],
   }

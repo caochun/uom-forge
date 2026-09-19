@@ -169,6 +169,14 @@ test('restoring an existing draft preserves the document, edits, answers, feedba
           firstTextMs: 100,
           status: 'completed',
         },
+        {
+          callId: 'glm1',
+          provider: 'glm',
+          model: 'glm-5.3-flash',
+          reasoningEffort: 'max',
+          connectedMs: 80,
+          status: 'completed',
+        },
       ],
     },
     messages: [
@@ -206,6 +214,8 @@ test('restoring an existing draft preserves the document, edits, answers, feedba
   assert.equal(restored.timings.understand?.[0].provider, 'codex')
   assert.equal(restored.timings.understand?.[1].provider, 'gpt')
   assert.equal(restored.timings.understand?.[1].connectedMs, 60)
+  assert.equal(restored.timings.understand?.[2].provider, 'glm')
+  assert.equal(restored.timings.understand?.[2].reasoningEffort, 'max')
   assert.deepEqual(restored.messages[0].context, stored.messages[0].context)
 })
 

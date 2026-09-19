@@ -1,4 +1,5 @@
 import type { BusinessClarification } from './analysis.ts'
+import type { UnderstandingReview } from './workflow.ts'
 
 /**
  * Evidence-first semantic handoff between business understanding and model
@@ -52,6 +53,15 @@ export interface ElementMapping {
   coverage: 'full' | 'partial' | 'missing'
 }
 
+// Hypothetical instances for checking expression, never additional business facts.
+export interface BusinessScenario {
+  id: string
+  factIds: string[]
+  statement: string
+  scenario: string
+  distinction: string
+}
+
 export interface SemanticPlanV2 {
   /** Versioned so drafts can be migrated at the storage boundary. */
   schemaVersion: '2'
@@ -62,4 +72,8 @@ export interface SemanticPlanV2 {
   mappings: ElementMapping[]
   boundaries: string[]
   clarifications: BusinessClarification[]
+  scenarios?: BusinessScenario[]
+  narrativeVersion?: string
+  mappedModelVersion?: string
+  understandingReview?: UnderstandingReview
 }

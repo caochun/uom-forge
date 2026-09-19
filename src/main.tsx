@@ -1,3 +1,4 @@
+import { prepareModelResume, resumeNarrative } from './model-resume.ts'
 import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
@@ -40,6 +41,7 @@ import type {
   ProviderId,
 } from '../shared/analysis.ts'
 import {
+  DEFAULT_PROVIDER,
   PROVIDERS,
   RUNTIMES,
 } from '../shared/analysis.ts'
@@ -84,6 +86,8 @@ const STAGES = {
   understand: '理解业务',
   model: '建立候选模型',
   compile: '整理候选模型',
+  verify: '检查并修正当前候选',
+  map: '建立事实映射',
   narrate: '生成模型自述',
   assess: '评估业务过程支撑',
 }
@@ -148,7 +152,7 @@ function App() {
   const [toast, setToast] = useState('')
   // The workbench defaults to the iterative local workflow. The shared
   // constants remain the protocol/server defaults for API callers.
-  const [provider, setProvider] = useState<ProviderId>('deepseek')
+  const [provider, setProvider] = useState<ProviderId>(DEFAULT_PROVIDER)
   const [runtime, setRuntime] = useState<AgentRuntimeId>('pi')
   const busyRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
@@ -300,7 +304,7 @@ function App() {
     const started = Date.now()
     const basis = projectRef.current.revisions.business
     const modelRevision = projectRef.current.revisions.model + 1
-    const tracksModeling = stage === 'model' || stage === 'compile'
+    const tracksModeling = stage === 'model' || stage === 'compile' || stage === 'verify' || stage === 'map'
     const addModelActivity = (text: string) => {
       if (!tracksModeling || !text.trim()) return
       setModelActivity((current) =>
@@ -314,13 +318,13 @@ function App() {
     setJob({
       stage,
       started,
-      part: stage === 'compile' ? 'compile' : '',
+      part: stage === 'compile' ? 'compile' : stage === 'verify' ? 'expression' : stage === 'map' ? 'mapping' : '',
       text: STAGES[stage],
     })
     setView(
       stage === 'understand'
         ? 'understanding'
-        : stage === 'model' || stage === 'compile'
+        : stage === 'model' || stage === 'compile' || stage === 'verify' || stage === 'map'
           ? 'model'
           : 'review',
     )
@@ -417,7 +421,7 @@ function App() {
         if (
           event.part &&
           event.part !== part &&
-          (stage === 'model' || stage === 'compile')
+          (stage === 'model' || stage === 'compile' || stage === 'verify' || stage === 'map')
         ) {
           part = event.part
           output += '\n\n—— ' + STAGE_PART_LABELS[part] + ' ——\n\n'
@@ -522,7 +526,7 @@ function App() {
       }
       if (event.type === 'result') {
         received.result = event.result
-        addModelActivity('建模流程已完成。')
+        addModelActivity('本次执行已结束，请查看检查结论及未决事项。')
       }
     })
     const result = received.result
@@ -543,9 +547,18 @@ function App() {
     }))
     return result
   }
+  const resume = (step: 'verify' | 'map') => execute(async () => {
+    const saved = prepareModelResume(project, step)
+    const result = await runStage(step, { narrative: resumeNarrative(project), result: saved })
+    setProject(current => receiveClarifications({
+      ...current,
+      plan: current.plan ? { ...current.plan, semantic: result.semantic, warnings: result.validation.warnings, compiled: true } : null,
+      candidate: current.candidate ? { ...current.candidate, model: result.model, edited: false, expressionReview: result.expressionReview } : null,
+    }, result.clarifications, 'model'))
+  })
   const stop = () => {
     cancelled.current = true
-    if (job?.stage === 'model' || job?.stage === 'compile')
+    if (job?.stage === 'model' || job?.stage === 'compile' || job?.stage === 'verify' || job?.stage === 'map')
       setModelActivity((current) =>
         current.at(-1) === '任务已停止。'
           ? current
@@ -588,6 +601,7 @@ function App() {
             })
           : await runStage('model', {
               narrative: project.understanding?.narrative || '',
+              understandingReview: project.understanding?.review,
               instruction:
                 project.feedbackDocumentRevision === project.revisions.document
                   ? project.feedback
@@ -836,9 +850,9 @@ function App() {
       setDiscussing(false)
     }
   }
-  const modelRunning = job?.stage === 'model' || job?.stage === 'compile'
+  const modelRunning = job?.stage === 'model' || job?.stage === 'compile' || job?.stage === 'verify' || job?.stage === 'map'
   const runPart = modelRunning
-    ? job.part || (job.stage === 'compile' ? 'compile' : 'semantic')
+    ? job.part || (job.stage === 'compile' ? 'compile' : job.stage === 'verify' ? 'expression' : job.stage === 'map' ? 'mapping' : 'semantic')
     : undefined
   const visibleStages: AnalysisStage[] =
     view === 'understanding'
@@ -916,6 +930,17 @@ function App() {
         ? { action: { label: '重新整理模型', run: () => build(true) } }
         : {}),
     })
+  if (view === 'model' && canCheck && project.plan?.compiled) {
+    if (project.candidate?.edited || project.candidate?.expressionReview?.status !== 'passed') todos.push({ key: 'resume-check', text: '使用当前候选检查具体业务情形，保留已有模型及修正记录。',
+      action: { label: '检查并修正当前候选', disabled: busy, run: () => resume('verify') } })
+    if (project.plan.semantic && !project.candidate?.edited && project.plan.semantic.status !== 'mapped')
+      todos.push({ key: 'resume-map', text: '事实与候选已经保留，可以单独继续映射。',
+        action: { label: '仅重试事实映射', disabled: busy, run: () => resume('map') } })
+    const cases = project.candidate?.expressionReview?.snapshots[project.candidate.expressionReview.selectedSnapshot]?.check?.cases || []
+    if (cases.some(item => item.status !== 'expressed' && item.repairTarget === 'understanding'))
+      todos.push({ key: 'return-understanding', text: '检查发现业务依据需要核对；修改模型不能代替澄清业务。',
+        action: { label: '核对业务理解', run: () => setView('understanding') } })
+  }
   if (view === 'model')
     for (const [index, warning] of (project.plan?.warnings || []).entries())
       todos.push({ key: `warning-${index}`, text: warning })
@@ -996,7 +1021,7 @@ function App() {
           <div className="runtime-choice">
             <span className="choice-label">模型</span>
             <div className="provider-switch" aria-label="推理提供方">
-              {(['deepseek', 'gpt', 'qwen'] as const).map((value) => (
+              {(['deepseek', 'gpt', 'qwen', 'glm'] as const).map((value) => (
                 <button
                   key={value}
                   disabled={busy || discussing}

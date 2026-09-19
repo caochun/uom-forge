@@ -159,24 +159,12 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
       }
       if (prompt.includes('第二阶段内部业务表达检查')) {
         assert.match(prompt, /NARRATIVE_ONLY/)
+        assert.match(prompt, /scenario-story-1/)
         assert.doesNotMatch(prompt, /FEEDBACK_ONLY|跟踪事项与成果/)
-        return JSON.stringify({
-          summary: '可表达。',
-          cases: [
-            {
-              id: 'c1',
-              fact: '事项形成成果',
-              basis: 'NARRATIVE_ONLY',
-              scenario: '事项 A 形成成果 B',
-              status: 'expressed',
-              elements: ['produces'],
-              explanation: '形成关系明确归属。',
-              gap: '',
-              suggestion: '',
-            },
-          ],
-          clarifications: [],
-        })
+        return JSON.stringify({ summary: '可表达。', judgments: [{
+          id: 'scenario-story-1', status: 'expressed', elements: ['produces'],
+          explanation: '形成关系明确绑定这次事项与成果。', gap: '', suggestion: '',
+        }], additionalCases: [], clarifications: [] })
       }
       assert.ok(
         events.some(

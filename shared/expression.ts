@@ -1,5 +1,6 @@
 import type { BusinessClarification } from './analysis.ts'
 import type { CandidateModel } from './model.ts'
+import type { ModelLineage, REPAIR_TARGET_LABELS } from './workflow.ts'
 
 // Construction metadata, never part of the ontology or final assessment input.
 export interface ExpressionCase {
@@ -12,6 +13,12 @@ export interface ExpressionCase {
   explanation: string
   gap: string
   suggestion: string
+  factIds?: string[]
+  repairTarget?: keyof typeof REPAIR_TARGET_LABELS
+}
+export interface ExpressionBaseline {
+  cases: (Pick<ExpressionCase, 'id' | 'fact' | 'basis' | 'scenario'> &
+    Partial<Pick<ExpressionCase, 'status' | 'factIds'>>)[]
 }
 export interface ExpressionCheck {
   summary: string
@@ -32,6 +39,7 @@ export interface ExpressionReview {
   selectedSnapshot: number
   changes: ModelChange[]
   warnings: string[]
+  lineage?: ModelLineage
 }
 export const EXPRESSION_STATUS = {
   checking: '正在检查业务事实',
@@ -47,6 +55,7 @@ export const STAGE_PART_LABELS = {
   expression: '检查业务事实',
   repair: '定点修正模型',
   recheck: '复查业务事实',
+  mapping: '建立事实映射',
 } as const
 
 export function interruptReview(review: ExpressionReview): ExpressionReview {

@@ -1,3 +1,4 @@
+import { readUnderstandingReview, readLineage } from '../shared/workflow.ts'
 import type {
   Assessment,
   Question,
@@ -26,7 +27,7 @@ import type { SemanticPlanV2 } from '../shared/semantic.ts'
 import { validateSemanticPlan } from '../shared/semantic-validation.ts'
 import { readUnderstandingSources } from '../shared/understanding-sources.ts'
 
-const stages = ['understand', 'model', 'compile', 'narrate', 'assess'] as const
+const stages = ['understand', 'model', 'compile', 'verify', 'map', 'narrate', 'assess'] as const
 const evidence = (value: unknown): Evidence[] =>
   records(value).map((item) => ({ quote: text(item.quote) }))
 const element = (item: Record<string, unknown>) => ({
@@ -157,7 +158,11 @@ function readUnderstanding(value: unknown): Understanding | null {
     questions,
     warnings: strings(value.warnings),
     sources: readUnderstandingSources(value.sources, text(value.narrative)),
+    review: safeUnderstandingReview(value.review),
   }
+}
+function safeUnderstandingReview(value: unknown) {
+  try { return readUnderstandingReview(value) } catch { return undefined }
 }
 function readAssessment(value: unknown): Assessment | null {
   if (!isRecord(value)) return null
@@ -259,6 +264,8 @@ function readExpressionReview(value: unknown): ExpressionReview | undefined {
                 explanation: text(item.explanation),
                 gap: text(item.gap),
                 suggestion: text(item.suggestion),
+                factIds: strings(item.factIds),
+                repairTarget: item.repairTarget === 'understanding' || item.repairTarget === 'clarification' ? item.repairTarget : 'model',
               }),
             ),
             clarifications: records(snapshot.check.clarifications).map(
@@ -278,6 +285,7 @@ function readExpressionReview(value: unknown): ExpressionReview | undefined {
   if (!snapshots.length) return undefined
   return interruptReview({
     status: value.status as ExpressionReview['status'],
+    lineage: readLineage(value.lineage),
     snapshots,
     selectedSnapshot:
       Number.isInteger(value.selectedSnapshot) &&
@@ -306,7 +314,8 @@ function readTimings(value: unknown): Project['timings'] {
         (item.provider !== 'codex' &&
           item.provider !== 'deepseek' &&
           item.provider !== 'gpt' &&
-          item.provider !== 'qwen')
+          item.provider !== 'qwen' &&
+          item.provider !== 'glm')
       )
         return []
       const status: TurnTiming['status'] =

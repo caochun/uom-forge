@@ -330,7 +330,7 @@ try {
     model,
     expressionReview: review,
   })
-  await emit(page, { type: 'phase', part: 'semantic', text: '正在映射。' })
+  await emit(page, { type: 'phase', part: 'mapping', text: '正在映射。' })
   await expect(
     tabs(page).getByRole('button', { name: /业务依据/ }),
   ).toContainText('正在建立覆盖映射')
@@ -402,6 +402,26 @@ try {
   await page.locator('.fact-row > summary').click()
   await expect(page.locator('.source-references')).toContainText(originalText)
   await context.close()
+
+  const resumeDraft = structuredClone(project)
+  resumeDraft.plan!.semantic!.scenarios = [{ id: 'Q1', factIds: ['F1'], statement: '客户提交订单', scenario: '客户 A 提交订单 X。', distinction: '确定订单的提交者。' }]
+  const recovery = await open(resumeDraft)
+  await recovery.page.getByRole('button', { name: '仅重试事实映射', exact: true }).click()
+  await expect(recovery.page.getByRole('button', { name: '停止', exact: true })).toBeVisible()
+  assert.equal(await recovery.page.evaluate(() => (window as unknown as Harness).lastModelRequest.stage), 'map')
+  await emit(recovery.page, { type: 'phase', part: 'mapping', text: '正在建立事实映射。' })
+  await expect(tabs(recovery.page).getByRole('button', { name: /业务依据/ })).toHaveAttribute('data-state', 'active')
+  await emit(recovery.page, { type: 'result', result: { ...result, semantic: { ...mapped, scenarios: resumeDraft.plan!.semantic!.scenarios }, expressionReview: { ...review, status: 'incomplete' } } })
+  await recovery.page.getByText('代表性业务情形 · 1 项', { exact: true }).click()
+  await expect(recovery.page.getByText('客户 A 提交订单 X。', { exact: true })).toBeVisible()
+  await recovery.page.getByRole('button', { name: '检查并修正当前候选', exact: true }).click()
+  await expect(recovery.page.getByRole('button', { name: '停止', exact: true })).toBeVisible()
+  assert.equal(await recovery.page.evaluate(() => (window as unknown as Harness).lastModelRequest.stage), 'verify')
+  await emit(recovery.page, { type: 'model-checkpoint', model, expressionReview: review })
+  await emit(recovery.page, { type: 'result', result })
+  await expect(recovery.page.locator('.todo-bar')).toHaveCount(0)
+  await recovery.page.screenshot({ path: path.join(artifacts, 'resumed.png') })
+  await recovery.context.close()
 
   const staleDraft = structuredClone(project)
   staleDraft.revisions.document += 1

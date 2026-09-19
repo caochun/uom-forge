@@ -1,6 +1,7 @@
 import type { CandidateModel, Evidence } from './model.ts'
 import type { ExpressionReview } from './expression.ts'
 import type { SemanticPlanV2 } from './semantic.ts'
+import type { UnderstandingReview } from './workflow.ts'
 
 export interface BusinessDocument {
   name: string
@@ -27,6 +28,7 @@ export interface Understanding {
   questions: Question[]
   warnings: string[]
   sources?: UnderstandingSources
+  review?: UnderstandingReview
 }
 export interface UnderstandingSources {
   documentName: string
@@ -78,6 +80,7 @@ export interface ModelingInput {
   narrative: string
   currentModel?: unknown
   feedback?: string
+  understandingReview?: UnderstandingReview
 }
 export interface ModelingResult {
   semanticPlan: string
@@ -90,12 +93,13 @@ export interface ModelingResult {
   provenance: { basis: 'business-understanding'; evidence: 'unlinked' }
   validation: { elements: number; warnings: string[] }
 }
-export type ProviderId = 'deepseek' | 'gpt' | 'qwen'
-export const DEFAULT_PROVIDER: ProviderId = 'deepseek'
+export type ProviderId = 'deepseek' | 'gpt' | 'qwen' | 'glm'
+export const DEFAULT_PROVIDER: ProviderId = 'glm'
 export const PROVIDERS: Record<ProviderId, { name: string; label: string }> = {
   deepseek: { name: 'DeepSeek', label: 'DeepSeek API' },
   gpt: { name: 'GPT', label: 'GPT API' },
   qwen: { name: 'Qwen', label: 'Qwen API' },
+  glm: { name: 'GLM', label: 'GLM API' },
 }
 export type AgentRuntimeId = 'direct' | 'pi'
 export const DEFAULT_RUNTIME: AgentRuntimeId = 'pi'
@@ -123,7 +127,7 @@ export type ProviderEvent =
   | { type: 'delta'; text: string; reasoning?: boolean; size?: number }
   | { type: 'timing'; timing: TurnTiming }
 export type StagePart =
-  'reading' | 'semantic' | 'compile' | 'expression' | 'repair' | 'recheck'
+  'reading' | 'semantic' | 'compile' | 'expression' | 'repair' | 'recheck' | 'mapping'
 export type StageEvent =
   | (ProviderEvent & { part?: StagePart })
   | {
@@ -140,9 +144,10 @@ export type StageEvent =
     }
   | { type: 'semantic-plan'; part: 'semantic'; semantic: SemanticPlanV2 }
   | ({ type: 'understanding-narrative' } & Understanding)
+  | { type: 'understanding-review'; review: UnderstandingReview }
 export type AnalysisRequest = { provider: ProviderId; runtime?: AgentRuntimeId } & (
   | { stage: 'understand'; document: BusinessDocument }
-  | { stage: 'model'; narrative: string; model?: unknown; instruction?: string }
+  | { stage: 'model'; narrative: string; model?: unknown; instruction?: string; understandingReview?: UnderstandingReview }
   | {
       stage: 'compile'
       semanticPlan: string
@@ -151,6 +156,8 @@ export type AnalysisRequest = { provider: ProviderId; runtime?: AgentRuntimeId }
     }
   | { stage: 'narrate'; model: CandidateModel }
   | { stage: 'assess'; model: CandidateModel }
+  | { stage: 'verify'; narrative: string; result: ModelingResult }
+  | { stage: 'map'; narrative: string; result: ModelingResult }
 )
 export interface DiscussionRequest {
   provider: ProviderId
@@ -164,6 +171,8 @@ export interface AnalysisResults {
   compile: ModelingResult
   narrate: { narrative: string }
   assess: { assessment: Assessment }
+  verify: ModelingResult
+  map: ModelingResult
 }
 export type AnalysisResult = AnalysisResults[keyof AnalysisResults]
 export type AnalysisEvent =

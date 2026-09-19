@@ -33,10 +33,10 @@ const model: CandidateModel = {
   activities: [],
   boundaries: ['记录如何归属事项尚未确定。'],
 }
-const uncertainCheck = (basis: string) =>
+const uncertainCheck = (basis: string, frozen = false) =>
   JSON.stringify({
     summary: '业务归属尚未明确。',
-    cases: [
+    ...(frozen ? { judgments: [{ id: 'scenario-story-1', status: 'uncertain', elements: [], explanation: '业务归属尚未确定。', gap: '归属未定。', suggestion: '保留边界。' }], additionalCases: [] } : { cases: [
       {
         id: 'ownership',
         fact: '记录归属事项',
@@ -48,7 +48,7 @@ const uncertainCheck = (basis: string) =>
         gap: '归属未确定。',
         suggestion: '保留未知，不作默认。',
       },
-    ],
+    ] }),
     clarifications: [],
   })
 
@@ -85,7 +85,7 @@ test('clarifications are review metadata with basis and impact, published before
       const fixture = semanticFixture(prompt, narrative)
       if (fixture) return fixture
       if (++calls === 1) return plan
-      if (calls === 3) return uncertainCheck(narrative)
+      if (calls === 3) return uncertainCheck(narrative, true)
       assert.ok(
         events.some(
           (event) =>
@@ -128,7 +128,7 @@ test('unsupported business questions cannot silently reach the user or compiler'
       if (fixture) return fixture
       calls++
       if (calls === 1) return plan
-      if (calls === 3) return uncertainCheck('独立保存事项。')
+      if (calls === 3) return uncertainCheck('独立保存事项。', true)
       assert.doesNotMatch(prompt, /一份处理记录可以归属几个事项/)
       return JSON.stringify(model)
     },

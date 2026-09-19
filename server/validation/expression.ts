@@ -1,5 +1,5 @@
 import { Ajv } from 'ajv'
-import type { ExpressionCheck, ModelChange } from '../../shared/expression.ts'
+import type { ExpressionCheck, ExpressionBaseline, ModelChange } from '../../shared/expression.ts'
 import type { CandidateModel } from '../../shared/model.ts'
 import type { BusinessClarification } from '../../shared/analysis.ts'
 import { MODEL_COLLECTIONS } from '../../shared/model.ts'
@@ -49,6 +49,8 @@ const validate = ajv.compile<CheckOutput>({
           elements: { type: 'array', uniqueItems: true, items: text },
           gap: { type: 'string' },
           suggestion: { type: 'string' },
+          factIds: { type: 'array', uniqueItems: true, items: text },
+          repairTarget: { enum: ['model', 'understanding', 'clarification'] },
         },
       },
     },
@@ -59,7 +61,8 @@ export function parseExpressionCheck(
   raw: string,
   narrative: string,
   model: CandidateModel,
-  previous?: ExpressionCheck,
+  previous?: ExpressionBaseline,
+  mode: 'initial' | 'recheck' = 'recheck',
 ): ExpressionCheck {
   let value = parseJsonOutput(raw, '业务表达检查')
   // Empty optional metadata and set-like references do not require inference.
@@ -93,7 +96,7 @@ export function parseExpressionCheck(
       delete item.basisIds
     }
     if (value.clarifications === undefined) value.clarifications = []
-    if (previous && value.additionalCases === undefined)
+    if (previous && mode === 'recheck' && value.additionalCases === undefined)
       value.additionalCases = []
     for (const key of ['cases', 'judgments', 'additionalCases']) {
       const items = value[key]
@@ -120,7 +123,13 @@ export function parseExpressionCheck(
       for (const [index, item] of value.clarifications.entries())
         if (isRecord(item)) resolveBasis(item, `业务澄清 ${index + 1}`)
   }
-  if (previous) {
+  // Accept the pre-scenario protocol during rolling upgrades. The current
+  // prompt asks for full `cases`, but an older provider may return judgments;
+  // map those judgments onto the fixed scenarios without allowing their
+  // facts or evidence to change.
+  if (mode === 'initial' && previous && isRecord(value) && Array.isArray(value.judgments) && !Array.isArray(value.cases))
+    mode = 'recheck'
+  if (previous && mode === 'recheck') {
     if (
       !isRecord(value) ||
       !Array.isArray(value.judgments) ||
@@ -162,6 +171,7 @@ export function parseExpressionCheck(
               'explanation',
               'gap',
               'suggestion',
+              'repairTarget',
             ].includes(key),
         )
       )
@@ -173,7 +183,7 @@ export function parseExpressionCheck(
           explanation: `${judgment.explanation} 模型可以表达未决边界，业务歧义仍需确认。`,
         }
       }
-      return { ...prior, ...judgment }
+      return { ...prior, ...judgment, ...(judgment.status === 'expressed' ? { repairTarget: 'model' } : {}) }
     })
     value = {
       summary: value.summary,
@@ -193,6 +203,8 @@ export function parseExpressionCheck(
       throw new Error(`检查用例 ${item.id} 的依据不在业务说明中。`)
     if (item.elements.some((id) => !ids.has(id)))
       throw new Error(`检查用例 ${item.id} 引用了不存在的模型元素。`)
+    if (item.status === 'uncertain') item.repairTarget = item.repairTarget === 'understanding' ? 'understanding' : 'clarification'
+    else item.repairTarget ??= 'model'
     if (item.status === 'expressed' && !item.elements.length)
       throw new Error(`可表达用例 ${item.id} 必须指向实际模型元素。`)
     if (
@@ -252,7 +264,7 @@ export function applyModelRepair(
   const candidate = structuredClone(model)
   const defects = new Set(
     check.cases
-      .filter((item) => item.status === 'defect')
+      .filter((item) => item.status === 'defect' && (!item.repairTarget || item.repairTarget === 'model'))
       .map((item) => item.id),
   )
   const seen = new Set<string>()

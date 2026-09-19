@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CandidateDraft } from '../types.ts'
 import type { ExpressionCase } from '../../shared/expression.ts'
 import { EXPRESSION_STATUS } from '../../shared/expression.ts'
+import { REPAIR_TARGET_LABELS } from '../../shared/workflow.ts'
 
 const labels = {
   expressed: '可以表达',
@@ -30,7 +31,7 @@ export default function ExpressionReview({
   }, [focusRequest])
   if (!review) return null
   const latest = review.snapshots[review.selectedSnapshot]
-  const reverted = review.snapshots.length > 1 && review.selectedSnapshot === 0
+  const reverted = review.selectedSnapshot < review.snapshots.length - 1
   const check = latest?.check
   const cases = check?.cases || []
   const remaining = cases.filter((item) => item.status !== 'expressed')
@@ -52,6 +53,7 @@ export default function ExpressionReview({
       </div>
       <p>{item.scenario}</p>
       <p>{item.explanation}</p>
+      {item.status !== 'expressed' && item.repairTarget && <p className="muted">处理位置：{REPAIR_TARGET_LABELS[item.repairTarget]}</p>}
       {!!item.elements.length && (
         <div className="expression-elements">
           {item.elements.map((id) =>
@@ -130,7 +132,7 @@ export default function ExpressionReview({
             </summary>
             <ul>
               {review.changes.map((change) => (
-                <li key={`${change.collection}:${change.id}`}>
+                <li key={`${change.collection}:${change.id}:${review.changes.indexOf(change)}`}>
                   <strong>{names.get(change.id) || change.id}</strong>：
                   {change.reason}
                 </li>
@@ -159,8 +161,8 @@ export default function ExpressionReview({
             <summary>
               {reverted ? '修正后的复查（存在回归，未采用）' : '修正前检查'}
             </summary>
-            <p>{review.snapshots[reverted ? 1 : 0].check?.summary}</p>
-            {review.snapshots[reverted ? 1 : 0].check?.cases.map((item) =>
+            <p>{review.snapshots[reverted ? review.snapshots.length - 1 : 0].check?.summary}</p>
+            {review.snapshots[reverted ? review.snapshots.length - 1 : 0].check?.cases.map((item) =>
               card(item, false),
             )}
           </details>

@@ -1,3 +1,4 @@
+import { readUnderstandingReview } from '../shared/workflow.ts'
 import type {
   AnalysisEvent,
   AnalysisResult,
@@ -47,6 +48,9 @@ export function parseAnalysisEvent(value: unknown): AnalysisEvent {
       )
         return value as AnalysisEvent
       break
+    case 'understanding-review':
+      if (value.review !== undefined) return { type: 'understanding-review', review: readUnderstandingReview(value.review)! }
+      break
     case 'understanding-narrative':
       if (typeof value.narrative === 'string') return value as AnalysisEvent
       break
@@ -63,6 +67,8 @@ export function isStageResult<S extends AnalysisStage>(
     understand: ['understanding'],
     model: ['semanticPlan', 'model', 'clarifications', 'expressionReview'],
     compile: ['semanticPlan', 'model', 'clarifications', 'expressionReview'],
+    verify: ['semanticPlan', 'model', 'clarifications', 'expressionReview'],
+    map: ['semanticPlan', 'model', 'clarifications', 'expressionReview'],
     narrate: ['narrative'],
     assess: ['assessment'],
   } as const

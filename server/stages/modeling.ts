@@ -16,6 +16,7 @@ import { checkOrRepairCompiledJson } from '../agents/pi-compile.ts'
 import type { SemanticPlanV2 } from '../../shared/semantic.ts'
 import { buildSemanticPreparation, mapSemanticPlan } from './semantic.ts'
 import { validateSemanticPlan } from '../validation/semantic.ts'
+import { artifactVersion } from '../../shared/workflow.ts'
 
 function includeSemanticClarifications(
   review: ClarificationReview,
@@ -47,11 +48,14 @@ export async function buildModel(
   const stageOptions: StageOptions = {
     ...options,
     onEvent: (event) => {
+      if (event.type === 'semantic-plan' && input.understandingReview)
+        event = { ...event, semantic: { ...event.semantic, understandingReview: input.understandingReview } }
       if (event.type === 'semantic-plan') semantic = event.semantic
       report(event)
     },
   }
   semantic = await buildSemanticPreparation(input.narrative, runTurn, stageOptions)
+  if (input.understandingReview) semantic.understandingReview = input.understandingReview
   let semanticPlan: string
   if (usePi) {
     semanticPlan = await runPiModeling(input, runTurn, stageOptions, semantic)
@@ -106,7 +110,7 @@ export async function compileModel(
     ? validateSemanticPlan(semantic, narrative)
     : undefined
   const semanticForCompilation = checkedSemantic
-    ? { ...checkedSemantic, status: 'stories' as const, mappings: [] }
+    ? { ...checkedSemantic, status: 'stories' as const, mappings: [], mappedModelVersion: undefined }
     : undefined
   const compiled = await compileReviewedPlan(
     semanticPlan,
@@ -119,7 +123,7 @@ export async function compileModel(
   return completeSemanticMapping(checked, narrative, runTurn, options)
 }
 
-async function completeSemanticMapping(
+export async function completeSemanticMapping(
   result: ModelingResult,
   narrative: string,
   runTurn: RunTurn,
@@ -133,9 +137,11 @@ async function completeSemanticMapping(
       runTurn,
       narrative,
       options,
+      result.expressionReview,
     )
     return { ...result, semantic }
   } catch (error) {
+    options.signal?.throwIfAborted()
     return {
       ...result,
       validation: {
@@ -147,6 +153,44 @@ async function completeSemanticMapping(
       },
     }
   }
+}
+
+/** Resume against a specific saved candidate; never recompile its old plan. */
+export async function resumeModel(
+  step: 'verify' | 'map', narrative: string, result: ModelingResult,
+  runTurn: RunTurn, options: StageOptions = {},
+): Promise<ModelingResult> {
+  requireText(narrative, '业务说明')
+  const lineage = result.expressionReview.lineage
+  if (lineage && (lineage.narrativeVersion !== artifactVersion(narrative) ||
+    lineage.planVersion !== artifactVersion(result.semanticPlan) ||
+    lineage.candidateVersion !== artifactVersion(result.model)))
+    throw new Error('恢复依据或候选版本已变化，请基于当前版本重新检查。')
+  if (result.semantic) validateSemanticPlan(result.semantic, narrative)
+  const savedModel = result.expressionReview.snapshots[result.expressionReview.selectedSnapshot]?.model
+  if (!savedModel || artifactVersion(savedModel) !== artifactVersion(result.model))
+    throw new Error('检查快照与待恢复候选不一致。')
+  const fresh: ModelingResult = {
+    ...result,
+    validation: {
+      ...result.validation,
+      warnings: step === 'verify'
+        ? result.validation.warnings.filter(w =>
+            !result.expressionReview.warnings.includes(w) &&
+            !w.startsWith('事实到模型元素的映射未完成：'),
+          )
+        : result.validation.warnings.filter(w =>
+            !w.startsWith('事实到模型元素的映射未完成：'),
+          ),
+    },
+    ...(result.semantic ? { semantic: { ...result.semantic, status: 'stories', mappings: [], mappedModelVersion: undefined } } : {}),
+  }
+  if (step === 'map') {
+    if (!fresh.semantic) throw new Error('没有可恢复的事实与业务故事。')
+    return completeSemanticMapping(fresh, narrative, runTurn, options)
+  }
+  const checked = await checkAndRepair(fresh, narrative, runTurn, options, result.expressionReview)
+  return completeSemanticMapping(checked, narrative, runTurn, options)
 }
 
 async function compileReviewedPlan(

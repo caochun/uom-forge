@@ -53,27 +53,7 @@ const uncertainCheck = (basis: string, frozen = false) =>
   })
 
 function semanticFixture(prompt: string, source: string): string | undefined {
-  if (prompt.includes('业务事实提取器'))
-    return JSON.stringify({
-      facts: [{
-        id: 'fact-1', statement: source, kind: 'event', actors: ['业务方'],
-        objects: ['事项'], conditions: [], source, certainty: 'explicit',
-      }],
-    })
-  if (prompt.includes('组织成业务故事'))
-    return JSON.stringify({
-      stories: [{
-        id: 'story-1', name: '办理事项', goal: '完成事项', factIds: ['fact-1'],
-        steps: [{ order: 1, actor: '业务方', action: '办理', object: '事项', factIds: ['fact-1'] }],
-      }],
-    })
-  if (prompt.includes('映射到已经编译的候选领域模型元素'))
-    return JSON.stringify({
-      mappings: [{
-        factId: 'fact-1', elementIds: [], mappingType: 'object',
-        explanation: '当前候选保留该事实为边界，尚无对应元素。', coverage: 'missing',
-      }],
-    })
+  if (prompt.includes('形成用于建模的业务依据')) return source
 }
 
 test('clarifications are review metadata with basis and impact, published before B and omitted from its input', async () => {
@@ -94,14 +74,14 @@ test('clarifications are review metadata with basis and impact, published before
         ),
       )
       assert.ok(prompt.includes(JSON.stringify(semantics)))
-      assert.match(prompt, /fact-1/)
+      assert.doesNotMatch(prompt, /fact-1/)
       assert.doesNotMatch(prompt, /一份处理记录可以归属几个事项|只归属一个事项/)
       return JSON.stringify(model)
     },
     { onEvent: (event) => events.push(event) },
   )
-  assert.equal(calls, 3)
-  assert.deepEqual(result.clarifications, parseModelClarifications(plan))
+  assert.equal(calls, 2)
+  assert.deepEqual(result.clarifications, parseModelClarifications(plan).map(item => ({ ...item, basisSource: 'business-basis' })))
   assert.deepEqual(result.model.boundaries, model.boundaries)
   assert.equal('questions' in result.model, false)
   assert.equal(result.semanticPlan, plan)
@@ -112,7 +92,7 @@ test('clarifications are review metadata with basis and impact, published before
     return JSON.stringify(model)
   })
   assert.deepEqual(retry.clarifications, parseModelClarifications(plan))
-  assert.equal(retry.expressionReview.status, 'issues')
+  assert.equal(retry.expressionReview.status, 'not-run')
 })
 
 test('unsupported business questions cannot silently reach the user or compiler', async () => {
@@ -133,10 +113,10 @@ test('unsupported business questions cannot silently reach the user or compiler'
       return JSON.stringify(model)
     },
   )
-  assert.equal(calls, 3)
+  assert.equal(calls, 2)
   assert.deepEqual(result.clarifications, [])
   assert.equal(result.semanticPlan, plan)
-  assert.match(result.validation.warnings.join('\n'), /依据不在当前业务说明/)
+  assert.match(result.validation.warnings.join('\n'), /依据不在本轮业务依据或文档整理稿/)
   assert.throws(
     () =>
       parseModelClarifications(
@@ -198,7 +178,7 @@ test('one invalid question cannot erase valid questions or the plan when B fails
     ),
     /模型整理失败/,
   )
-  assert.equal(calls, 2)
+  assert.equal(calls, 3)
   const event = events.find((e) => e.type === 'model-plan')
   assert.ok(event?.type === 'model-plan')
   assert.equal(event.semanticPlan, mixed)
@@ -207,28 +187,19 @@ test('one invalid question cannot erase valid questions or the plan when B fails
   assert.equal(reviewModelClarifications(mixed).clarifications.length, 0)
 })
 
-test('duplicate questions are isolated and a questionnaire alone is not a model plan', async () => {
+test('duplicate questions are isolated without making the human-readable design a format gate', async () => {
   const duplicate = plan + '\n' + section.split('\n').slice(1).join('\n')
   const review = reviewModelClarifications(duplicate, narrative)
   assert.equal(review.clarifications.length, 1)
   assert.match(review.warnings[0], /重复/)
   let calls = 0
-  await assert.rejects(
-    buildModel({ narrative }, async (prompt) => {
-      const fixture = semanticFixture(prompt, narrative)
-      if (fixture) return fixture
-      calls++
-      return section
-    }),
-    /没有可整理的模型内容/,
-  )
+  const result = await compileModel(section, narrative, async prompt => {
+    calls++
+    assert.ok(prompt.includes(JSON.stringify(section)))
+    return JSON.stringify(model)
+  })
   assert.equal(calls, 1)
-  await assert.rejects(
-    compileModel(section, narrative, async () => {
-      throw new Error('must not invoke')
-    }),
-    /没有可整理的模型内容/,
-  )
+  assert.deepEqual(result.model, model)
 })
 
 test('no clarification section means no questionnaire; semantic scope and subsequent sections survive', () => {
@@ -252,4 +223,25 @@ test('no clarification section means no questionnaire; semantic scope and subseq
     /OLD_QUESTION_CANARY|HISTORICAL_CANARY/,
   )
   assert.match(JSON.stringify(context), /记录如何归属事项尚未确定/)
+})
+
+test('questions quoting a paraphrased business basis reach users and survive compilation retry with their actual source', async () => {
+  const reading = '文档说明办理后留档，但一份档案对应的事项数量还没有说清。'
+  const basis = '业务事项办理产生记录，记录可关联的事项数量未决。'
+  const draft = plan.replace(narrative, basis)
+  const replies = [basis, draft, JSON.stringify(model)]
+  const events: StageEvent[] = []
+  let calls = 0
+  const result = await buildModel({ narrative: reading }, async () => replies[calls++], { runtime: 'direct', onEvent: event => events.push(event) })
+  assert.equal(calls, 3)
+  assert.equal(result.clarifications.length, 1)
+  assert.equal(result.clarifications[0].basis, basis)
+  assert.equal(result.clarifications[0].basisSource, 'business-basis')
+  assert.deepEqual(result.validation.warnings, [])
+  assert.ok(events.some(event => event.type === 'model-plan' && event.clarifications[0]?.basisSource === 'business-basis'))
+  const retry = await compileModel(draft, reading, async () => JSON.stringify(model), {}, undefined, basis)
+  assert.deepEqual(retry.clarifications, result.clarifications)
+  const fabricated = reviewModelClarifications(draft.replace(basis, '所有记录必须公开。'), reading, basis)
+  assert.equal(fabricated.clarifications.length, 0)
+  assert.match(fabricated.warnings[0], /依据不在本轮业务依据或文档整理稿/)
 })

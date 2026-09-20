@@ -159,6 +159,43 @@ test('GLM understanding reports upstream quota errors instead of retrying tool h
   assert.equal(calls, 1)
 })
 
+test('Pi understanding returns text without automatic review or a finish tool handoff', async (t) => {
+  const previous = {
+    GLM_API_KEY: process.env.GLM_API_KEY,
+    GLM_API_URL: process.env.GLM_API_URL,
+    GLM_MODEL: process.env.GLM_MODEL,
+    GLM_REASONING_EFFORT: process.env.GLM_REASONING_EFFORT,
+  }
+  Object.assign(process.env, {
+    GLM_API_KEY: 'glm-understanding-test-key',
+    GLM_API_URL: 'https://glm.invalid/v4/chat/completions',
+    GLM_MODEL: 'glm-test',
+    GLM_REASONING_EFFORT: 'low',
+  })
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+  const narrative = '# 文档整理稿\n沿用文档自己的组织方式。\n\n有歧义的说法暂时保留。'
+  let request: any
+  t.mock.method(globalThis, 'fetch', async (_url: RequestInfo | URL, init?: RequestInit) => {
+    request = JSON.parse(String(init?.body))
+    return new Response(frame({ content: narrative }, 'stop') + done, { headers: { 'content-type': 'text/event-stream' } })
+  })
+  const result = await runPiUnderstanding(
+    { name: 'test', blocks: [{ id: '1', text: '业务事实。' }] },
+    'glm',
+    async () => { throw new Error('must not run a reviewer') },
+    { provider: 'glm', runtime: 'pi' },
+  )
+  assert.equal(result, narrative)
+  assert.equal(request.tools, undefined)
+  assert.equal(request.tool_choice, 'auto')
+  assert.equal(request.messages.some((message: any) => message.role === 'tool'), false)
+})
+
 test('shared Pi adapter preserves existing providers’ tool handoff request parameters', async () => {
   const env = {
     LLM_API_KEY: 'ds-test', LLM_API_URL: 'https://deepseek.invalid/v1', LLM_MODEL: 'deepseek-chat',

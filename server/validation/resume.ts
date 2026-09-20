@@ -5,13 +5,14 @@ import { validateSemanticPlan } from './semantic.ts'
 import { parseExpressionCheck } from './expression.ts'
 import { isRecord } from './values.ts'
 import { validateClarifications } from './clarifications.ts'
+import { readDesignReview } from '../../shared/design-review.ts'
 
 export function parseResumeResult(value: unknown, narrative: string): ModelingResult {
   if (!isRecord(value) || typeof value.semanticPlan !== 'string' || !isRecord(value.expressionReview))
     throw new Error('恢复需要已保存的候选及检查快照。')
   const model = validateCompiledModel(JSON.stringify(value.model))
   const review = value.expressionReview
-  if (!['passed', 'issues', 'incomplete', 'checking', 'repairing'].includes(String(review.status)) ||
+  if (!['not-run', 'passed', 'issues', 'incomplete', 'checking', 'repairing'].includes(String(review.status)) ||
     !Array.isArray(review.snapshots) || !review.snapshots.length || !Number.isInteger(review.selectedSnapshot) ||
     Number(review.selectedSnapshot) < 0 || Number(review.selectedSnapshot) >= review.snapshots.length ||
     !Array.isArray(review.changes) || !Array.isArray(review.warnings) || review.warnings.some(x => typeof x !== 'string'))
@@ -42,6 +43,8 @@ export function parseResumeResult(value: unknown, narrative: string): ModelingRe
   validateClarifications(clarifications, narrative)
   return {
     semanticPlan: value.semanticPlan, model,
+    designReview: readDesignReview(value.designReview),
+    ...(typeof value.businessBasis === 'string' ? { businessBasis: value.businessBasis } : {}),
     ...(value.semantic ? { semantic: validateSemanticPlan(value.semantic, narrative) } : {}),
     expressionReview: { ...review, snapshots } as unknown as ModelingResult['expressionReview'],
     clarifications,

@@ -1,7 +1,6 @@
-import { reviewUnderstanding } from './understanding-review.ts'
-import { artifactVersion, type UnderstandingReview } from '../../shared/workflow.ts'
+import { normalizeSectionHeadings } from './markdown-sections.ts'
 import { validateDocument } from '../validation/document.ts'
-import { understandingPrompt, UNDERSTANDING_SECTIONS } from './prompts.ts'
+import { understandingPrompt } from './prompts.ts'
 import type { BusinessDocument, Understanding } from '../../shared/analysis.ts'
 import type { RunTurn } from '../providers/types.ts'
 import { scopedTurn, type StageOptions } from './contracts.ts'
@@ -9,17 +8,6 @@ import { scopedTurn, type StageOptions } from './contracts.ts'
 import { extractQuestions } from '../../shared/questions.ts'
 import { runPiUnderstanding } from '../agents/pi-understanding.ts'
 import { extractUnderstandingSources } from '../../shared/understanding-sources.ts'
-
-export function understandingWarnings(narrative: string): string[] {
-  const headings = new Set(
-    [...narrative.matchAll(/^##[ \t]+(.+?)[ \t]*\r?$/gm)].map(
-      (match) => match[1],
-    ),
-  )
-  return UNDERSTANDING_SECTIONS.filter(({ title }) => !headings.has(title)).map(
-    ({ title }) => `业务说明未单列“${title}”，请检查相关语义是否有遗漏。`,
-  )
-}
 
 export async function readBusiness(
   document: BusinessDocument,
@@ -32,35 +20,25 @@ export async function readBusiness(
   report({
     type: 'phase',
     part: 'reading',
-    text: '正在阅读文档，形成业务语义说明。',
+    text: '正在整理文档内容，检查表述是否清楚、一致。',
   })
   const usePi =
     options.runtime === 'pi' ||
     (options.runtime === undefined && process.env.UOM_AGENT_RUNTIME === 'pi')
-  let review: UnderstandingReview | undefined
   const narrative = usePi
-    ? await runPiUnderstanding(document, options.provider || 'gpt', runTurn, {
-        ...options, onEvent: event => { if (event.type === 'understanding-review') review = event.review; report(event) },
-      })
+    ? await runPiUnderstanding(document, options.provider || 'gpt', runTurn, options)
     : await runTurn(
         understandingPrompt(document),
         scopedTurn(options, 'reading'),
       )
   options.signal?.throwIfAborted()
-  if (!narrative.trim()) throw new Error('未返回业务说明，请重试。')
-  const linked = extractUnderstandingSources(narrative, document)
-  if (!usePi) {
-    report({ type: 'phase', part: 'reading', text: '核对业务说明与原文的遗漏、新增和冲突。' })
-    review = await reviewUnderstanding(linked.narrative, document.blocks, runTurn, options.provider || 'gpt', options.signal)
-    report({ type: 'understanding-review', review })
-  }
-  if (review) review = { ...review, narrativeVersion: artifactVersion(linked.narrative) }
+  if (!narrative.trim()) throw new Error('未返回业务文档整理稿，请重试。')
+  const linked = extractUnderstandingSources(normalizeSectionHeadings(narrative, ['待确认问题']), document)
   const understanding: Understanding = {
     narrative: linked.narrative,
     sources: linked.sources,
-    review,
     questions: extractQuestions(linked.narrative),
-    warnings: [...understandingWarnings(linked.narrative), ...linked.warnings],
+    warnings: linked.warnings,
   }
   report({ type: 'understanding-narrative', ...understanding })
   return { understanding }

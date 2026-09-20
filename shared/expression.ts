@@ -34,7 +34,7 @@ export interface ModelChange {
   reason: string
 }
 export interface ExpressionReview {
-  status: 'checking' | 'repairing' | 'passed' | 'issues' | 'incomplete'
+  status: 'not-run' | 'checking' | 'repairing' | 'passed' | 'issues' | 'incomplete'
   snapshots: { model: CandidateModel; check?: ExpressionCheck }[]
   selectedSnapshot: number
   changes: ModelChange[]
@@ -42,6 +42,7 @@ export interface ExpressionReview {
   lineage?: ModelLineage
 }
 export const EXPRESSION_STATUS = {
+  'not-run': '尚未进行业务表达检查',
   checking: '正在检查业务事实',
   repairing: '正在定点修正',
   passed: '本轮检查用例均可表达',
@@ -50,7 +51,9 @@ export const EXPRESSION_STATUS = {
 } as const
 export const STAGE_PART_LABELS = {
   reading: '理解业务',
-  semantic: '形成建模说明',
+  basis: '整理业务依据',
+  semantic: '生成模型设计',
+  'design-check': '检验设计的业务表达',
   compile: '构造候选模型',
   expression: '检查业务事实',
   repair: '定点修正模型',

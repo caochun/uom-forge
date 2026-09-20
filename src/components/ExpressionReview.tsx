@@ -29,7 +29,7 @@ export default function ExpressionReview({
       details.current.scrollIntoView({ block: 'nearest' })
     }
   }, [focusRequest])
-  if (!review) return null
+  if (!review || review.status === 'not-run') return null
   const latest = review.snapshots[review.selectedSnapshot]
   const reverted = review.selectedSnapshot < review.snapshots.length - 1
   const check = latest?.check

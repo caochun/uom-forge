@@ -7,6 +7,7 @@ import type {
 import type { AnalysisStage } from './types.ts'
 import { isRecord } from './values.ts'
 import { validateSemanticPlan } from '../shared/semantic-validation.ts'
+import { readDesignReview } from '../shared/design-review.ts'
 
 // The server validates business payloads. This boundary checks the SSE envelope
 // and revalidates the persisted semantic handoff before it reaches UI state.
@@ -32,6 +33,15 @@ export function parseAnalysisEvent(value: unknown): AnalysisEvent {
       )
         return value as AnalysisEvent
       break
+    case 'business-basis':
+      if (value.part === 'basis' && typeof value.text === 'string') return value as AnalysisEvent
+      break
+    case 'design-review': {
+      const review = readDesignReview(value.review)
+      if (value.part === 'semantic' && review && (value.semanticPlan === undefined || typeof value.semanticPlan === 'string'))
+        return { type: 'design-review', part: 'semantic', review, ...(typeof value.semanticPlan === 'string' ? { semanticPlan: value.semanticPlan } : {}) }
+      break
+    }
     case 'semantic-plan':
       if (value.part === 'semantic' && isRecord(value.semantic))
         return {

@@ -2,10 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildModel, compileModel } from './modeling.ts'
 import { validateCompiledModel } from '../validation/compiled-model.ts'
-import { understandingWarnings } from './understanding.ts'
 import { extractQuestions } from '../../shared/questions.ts'
 import {
-  UNDERSTANDING_SECTIONS,
   semanticModelPrompt,
   compileModelPrompt,
   understandingPrompt,
@@ -88,30 +86,8 @@ const candidate = (): CandidateModel => ({
   boundaries: [],
 })
 
-function semanticFixture(prompt: string, source: string): string | undefined {
-  if (prompt.includes('业务事实提取器'))
-    return JSON.stringify({
-      facts: [{
-        id: 'fact-1', statement: '事项形成成果', kind: 'event',
-        actors: ['业务方'], objects: ['事项', '成果'], conditions: [],
-        result: '形成成果', source, certainty: 'explicit',
-      }],
-    })
-  if (prompt.includes('组织成业务故事'))
-    return JSON.stringify({
-      stories: [{
-        id: 'story-1', name: '办理事项', goal: '形成成果',
-        factIds: ['fact-1'],
-        steps: [{ order: 1, actor: '业务方', action: '办理', object: '事项', result: '形成成果', factIds: ['fact-1'] }],
-      }],
-    })
-  if (prompt.includes('映射到已经编译的候选领域模型元素'))
-    return JSON.stringify({
-      mappings: [{
-        factId: 'fact-1', elementIds: ['produces'], mappingType: 'relation',
-        explanation: '产出关系表达事项形成成果。', coverage: 'full',
-      }],
-    })
+function semanticFixture(prompt: string, _source: string): string | undefined {
+  if (prompt.includes('形成用于建模的业务依据')) return '依据采用自由文本。事项形成成果。'
 }
 
 test('semantic turn and compiler have isolated inputs; stream and result preserve the plan', async () => {
@@ -150,7 +126,8 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
       const fixture = semanticFixture(prompt, 'NARRATIVE_ONLY')
       if (fixture) return fixture
       if (prompt.includes('第二阶段 A')) {
-        assert.match(prompt, /NARRATIVE_ONLY/)
+        assert.doesNotMatch(prompt, /NARRATIVE_ONLY/)
+        assert.match(prompt, /依据采用自由文本。事项形成成果。/)
         assert.match(prompt, /FEEDBACK_ONLY/)
         assert.doesNotMatch(prompt, /additionalProperties|schemaVersion/)
         assert.match(prompt, /"from":"req","to":"result"/)
@@ -174,21 +151,18 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
       )
       assert.doesNotMatch(prompt, /FEEDBACK_ONLY/)
       assert.ok(prompt.includes(JSON.stringify(semanticPlan)))
-      assert.match(prompt, /fact-1|事项形成成果/)
+      assert.doesNotMatch(prompt, /fact-1|NARRATIVE_ONLY/)
       options.onEvent?.({ type: 'delta', text: JSON.stringify(candidate()) })
       return JSON.stringify(candidate())
     },
     { provider: 'gpt', onEvent: (event) => events.push(event) },
   )
-  assert.equal(prompts.length, 6)
-  assert.ok(
-    prompts.findIndex((prompt) => prompt.includes('映射到已经编译的候选领域模型元素')) >
-      prompts.findIndex((prompt) => prompt.includes('第二阶段内部业务表达检查')),
-  )
-  assert.equal(result.expressionReview.status, 'passed')
+  assert.equal(prompts.length, 3)
+  assert.ok(prompts.every(prompt => !prompt.includes('第二阶段内部业务表达检查') && !prompt.includes('映射到已经编译')))
+  assert.equal(result.expressionReview.status, 'not-run')
   assert.equal(result.semanticPlan, semanticPlan)
-  assert.equal(result.semantic?.status, 'mapped')
-  assert.deepEqual(result.semantic?.mappings[0].elementIds, ['produces'])
+  assert.equal(result.businessBasis, '依据采用自由文本。事项形成成果。')
+  assert.equal(result.semantic, undefined)
   assert.deepEqual(result.model, candidate())
   assert.deepEqual(result.provenance, {
     basis: 'business-understanding',
@@ -202,7 +176,7 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
     events
       .filter((event) => event.type === 'semantic-plan')
       .map((event) => event.semantic.status),
-    ['facts', 'stories', 'mapped'],
+    [],
   )
 })
 
@@ -210,7 +184,7 @@ test('compiler preserves relation context without domain-specific rules', () => 
   const prompt = compileModelPrompt('PLAN')
   assert.match(prompt, /关系语义保真检查/)
   assert.match(prompt, /组成部分、顺序、角色、来源\/去向/)
-  assert.match(prompt, /代表性业务事实回放检查/)
+  assert.match(prompt, /待审阅边界/)
   assert.doesNotMatch(prompt, /馈线|变电站|双电源/)
 })
 
@@ -263,8 +237,8 @@ test('standalone compilation retries only B using the exact saved semantic plan'
       return JSON.stringify(candidate())
     },
   )
-  assert.equal(calls, 2)
-  assert.equal(result.expressionReview.status, 'passed')
+  assert.equal(calls, 1)
+  assert.equal(result.expressionReview.status, 'not-run')
   assert.equal(result.semanticPlan, semanticPlan)
   for (const plan of ['', undefined, ' '])
     await assert.rejects(
@@ -300,7 +274,7 @@ test('cancellation between steps prevents compilation and retains the published 
     ),
     { name: 'AbortError' },
   )
-  assert.equal(calls, 3)
+  assert.equal(calls, 2)
   assert.equal(saved, semanticPlan)
 })
 
@@ -324,7 +298,7 @@ test('compiler failure or cancellation preserves plan without publishing a model
       ),
       cancel ? { name: 'AbortError' } : /模型整理失败，建模说明已保留/,
     )
-    assert.equal(calls, 4)
+    assert.equal(calls, cancel ? 3 : 4)
     assert.equal(
       events.find((event) => event.type === 'model-plan')?.semanticPlan,
       semanticPlan,
@@ -394,19 +368,11 @@ test('compiled output fills mechanical empty fields without requiring the model 
   assert.equal(parsed.activities[0].requirements[0].status, 'partial')
 })
 
-test('reading handoff reports missing sections without rewriting the explanation', () => {
-  const narrative = UNDERSTANDING_SECTIONS.map(
-    ({ title }) => `## ${title}\n材料未说明。`,
-  ).join('\n\n')
-  assert.deepEqual(understandingWarnings(narrative), [])
-  assert.equal(understandingWarnings('## 业务概述\n业务概述。').length, 10)
-  const prompt = understandingPrompt({
-    name: 'doc',
-    blocks: [{ id: '1', text: 'DOCUMENT' }],
-  })
-  for (const { title } of UNDERSTANDING_SECTIONS)
-    assert.ok(prompt.includes(`## ${title}`))
-  assert.match(prompt, /类型或业务分支/)
+test('understanding organizes document language without imposing modeling themes or a fixed format', () => {
+  const prompt = understandingPrompt({ name: 'test', blocks: [{ id: '1', text: '业务说明' }] })
+  assert.match(prompt, /组织方式自由，不要求固定章节/)
+  assert.match(prompt, /指代不明|前后矛盾/)
+  assert.doesNotMatch(prompt, /## 业务事实与关系|## 业务主体与业务事项|## 业务过程与过程分支/)
 })
 
 test('confirmation choices preserve commas and distinguish multiple selection from text', () => {
@@ -421,7 +387,68 @@ test('confirmation choices preserve commas and distinguish multiple selection fr
 })
 
 test('prompts contain no sample domain vocabulary or source evidence requirement in semantic step', () => {
-  const semantic = semanticModelPrompt({ narrative: '测试输入' })
+  const semantic = semanticModelPrompt({}, '测试业务依据')
   assert.doesNotMatch(semantic, /供电|馈线|主变|融资租赁|高速|blockId|basisIds/)
   assert.doesNotMatch(compileModelPrompt('PLAN'), /DOCUMENT/)
+})
+
+test('free-text business basis and design pass through unchanged; only final JSON can trigger a repair', async () => {
+  const basis = '业务依据不限标题：甲事项形成乙成果，成果属于该事项。'
+  const design = '对象：事项、成果。事项与成果有形成关系。'
+  const wrong = candidate()
+  wrong.relations[0].to = 'unknown'
+  const events: StageEvent[] = []
+  let calls = 0
+  const result = await buildModel({ narrative: '事项形成成果。' }, async (prompt, options) => {
+    calls++
+    if (calls === 1) {
+      assert.equal(options.outputFormat, undefined)
+      options.onEvent?.({ type: 'delta', text: basis })
+      return basis
+    }
+    if (calls === 2) {
+      assert.ok(prompt.includes(basis))
+      assert.equal(options.outputFormat, undefined)
+      return design
+    }
+    assert.equal(options.outputFormat, 'json')
+    assert.ok(prompt.includes(design))
+    if (calls === 3) return JSON.stringify(wrong)
+    assert.equal(calls, 4)
+    assert.match(prompt, /端点不是已有对象/)
+    assert.ok(prompt.includes(JSON.stringify(JSON.stringify(wrong))))
+    return JSON.stringify(candidate())
+  }, { runtime: 'direct', onEvent: event => events.push(event) })
+  assert.equal(calls, 4)
+  assert.equal(result.businessBasis, basis)
+  assert.equal(result.semanticPlan, design)
+  assert.equal(result.expressionReview.status, 'not-run')
+  assert.ok(events.some(event => event.type === 'delta' && event.part === 'basis'))
+  assert.ok(events.some(event => event.type === 'business-basis' && event.text === basis))
+  assert.equal(events.some(event => event.type === 'semantic-plan'), false)
+  assert.deepEqual(result.model, candidate())
+})
+
+test('harmless closing fences do not cause another model generation', async () => {
+  let calls = 0
+  const result = await compileModel('事项与成果形成关联。', '事项形成成果。', async () => {
+    calls++
+    return JSON.stringify(candidate()) + '\n``'
+  })
+  assert.equal(calls, 1)
+  assert.deepEqual(result.model, candidate())
+})
+
+test('stopping after basis generation preserves the text without generating a design', async () => {
+  const controller = new AbortController()
+  let calls = 0
+  let basis = ''
+  await assert.rejects(buildModel({ narrative: '事项形成成果。' }, async () => {
+    calls++
+    return '事项形成成果。'
+  }, { runtime: 'direct', signal: controller.signal, onEvent: event => {
+    if (event.type === 'business-basis') { basis = event.text; controller.abort() }
+  } }), { name: 'AbortError' })
+  assert.equal(calls, 1)
+  assert.equal(basis, '事项形成成果。')
 })

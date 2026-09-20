@@ -1,8 +1,10 @@
 import type { ProviderEvent, ProviderId } from '../../shared/analysis.ts'
+import type { ReasoningEffort } from '../../shared/reasoning.ts'
 
 export interface TurnOptions {
   outputFormat?: 'json'
   provider?: ProviderId
+  reasoningEffort?: ReasoningEffort
   signal?: AbortSignal
   onEvent?: (event: ProviderEvent) => void
 }

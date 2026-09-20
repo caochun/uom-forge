@@ -4,7 +4,7 @@ import { withoutQuestionSection } from './questions.ts'
 // A citation belongs to one complete Markdown line/paragraph. The clean text
 // remains the sole semantic input to modeling; IDs are provenance metadata.
 const marker = /\[\[source:([^\]\r\n]*)\]\]/g
-export const SOURCE_INSTRUCTIONS = `在每个有原文依据的业务说明段落、列表条目或表格行末尾，追加 [[source:原文块id]]；综合多个块时用英文逗号分隔，如 [[source:block-1,block-2]]。引用只作用于同一行，段落内不要手动换行。必须使用输入中真实的 id，不推测编号，不将 source 标记写在标题或待确认问题中。推断应在正文明确标为推断并引用相关背景；没有依据的内容不要补造引用。标记用于溯源，不表示推断已经得到原文证实。`
+export const SOURCE_INSTRUCTIONS = `在整理稿中每个有原文依据的段落、列表条目或表格行末尾，追加 [[source:原文块id]]；综合多个块时用英文逗号分隔，如 [[source:block-1,block-2]]。文档问题说明应引用涉及的相关块。引用只作用于同一行，段落内不要手动换行。必须使用输入中真实的 id，不推测编号，不将 source 标记写在标题或待确认问题中。推断应在正文明确标为推断并引用相关背景；没有依据的内容不要补造引用。标记用于溯源，不表示推断已经得到原文证实。`
 
 export function normalizedPassage(value: string): string {
   return value

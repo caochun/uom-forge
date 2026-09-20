@@ -10,9 +10,11 @@ import {
   X,
 } from 'lucide-react'
 import Markdown from './Markdown.tsx'
+import { SourceCatalogue } from './SourceReferences.tsx'
 export { default as Markdown } from './Markdown.tsx'
 import BusinessProcessSupport from './BusinessProcessSupport.tsx'
 import { modelingContent } from '../../shared/clarifications.ts'
+import { designReviewLabel } from '../../shared/design-review.ts'
 import QQDocEditor from 'qq-doc-clone'
 import ModelGraph from './ModelGraph.tsx'
 import { documentToHtml } from '../document.ts'
@@ -314,7 +316,22 @@ export function CandidateView({
           ))}
         </div>
       </div>
-      {mode === 'evidence' ? (
+      {mode === 'evidence' ? !plan?.semantic ? (
+        <article className="panel-surface reading-narrative business-basis">
+          <div className="panel-toolbar"><div>
+            <h2>业务依据</h2>
+            <p className="panel-subtitle">提炼事实、组织故事，明确模型需要表达什么；设计与表达检查共同使用本份依据。</p>
+          </div><span className="muted">{progress.steps.find(step => step.id === 'basis')?.detail}</span></div>
+          {plan?.businessBasis ? <Markdown>{plan.businessBasis}</Markdown> : (
+            <div className="empty-state">{progress.active?.id === 'basis' ? '正在从整理稿提炼事实、故事、规则与检验情形…' : '开始建模后，这里会展示从文档整理稿提炼的业务依据。'}</div>
+          )}
+          {plan?.basis && <details className="source-catalogue">
+            <summary>本轮依据来自的文档整理稿</summary>
+            <Markdown>{plan.basis.narrative}</Markdown>
+            {plan.basis.sources && <SourceCatalogue sources={plan.basis.sources} />}
+          </details>}
+        </article>
+      ) : (
         <>
         {!!plan?.semantic?.scenarios?.length && <details className="panel-surface narrative-body">
           <summary>代表性业务情形 · {plan.semantic.scenarios.length} 项</summary>
@@ -329,7 +346,7 @@ export function CandidateView({
           sources={plan?.basis?.sources}
           model={model}
           modelEdited={progress.reviewStale || progress.steps.find((step) => step.id === 'mapping')?.state === 'stale'}
-          mappingDetail={progress.steps.find((step) => step.id === 'mapping')!.detail}
+          mappingDetail={progress.steps.find((step) => step.id === 'mapping')?.detail || ''}
           mappingRunning={Boolean(running)}
           onRebuild={onRebuild}
           disabled={disabled || !canRebuild}
@@ -343,23 +360,41 @@ export function CandidateView({
           <div className="panel-toolbar">
             <div>
               <h2>模型设计</h2>
-              <p className="panel-subtitle">对象、关系、行为与规则的定义，以及设计依据和适用边界。</p>
+              <p className="panel-subtitle">用对象、关系、操作、只读能力和规则表达业务依据，并通过具体情形检查与修订。</p>
             </div>
             <span className="muted">
               {progress.steps.find((step) => step.id === 'decisions')?.detail}
             </span>
           </div>
-          {plan?.plan ? (
-            <Markdown>{modelingContent(plan.plan)}</Markdown>
+          {plan?.plan || plan?.designDraft ? (
+            <Markdown>{modelingContent(plan.designReview?.status === 'drafting' && plan.designDraft ? plan.designDraft : plan.plan)}</Markdown>
           ) : (
             <div className="empty-state">
               {progress.active?.id === 'decisions'
                 ? '正在判断对象边界和业务联系…'
-                : plan?.semantic
-                  ? '事实和故事已保留，模型设计尚未形成。'
+                : plan?.businessBasis || plan?.semantic
+                  ? '业务依据已保留，模型设计尚未形成。'
                   : '开始建模后，这里会解释模型的设计依据。'}
             </div>
           )}
+          {plan?.designReview && <details className="reading-note design-review" open={plan.designReview.status === 'checking' || plan.designReview.status === 'attention'}>
+            <summary>{designReviewLabel(plan.designReview)} · 已检查 {plan.designReview.rounds.length} 轮</summary>
+            <p className="muted">{plan.designReview.businessBasisVersion
+              ? '沿用本轮业务依据中的检验情形，复查修订后的表达；通过仅针对本轮情形，不代表业务已穷尽。'
+              : '这份历史检查从业务说明选择情形；通过仅针对所选情形，不代表业务已穷尽。'}</p>
+            {plan.designReview.rounds.map((round, index) => <section key={index}>
+              <strong>第 {index + 1} 轮表达检查</strong>
+              <Markdown>{round.feedback}</Markdown>
+              <details><summary>本轮检查的设计</summary><Markdown>{round.design}</Markdown></details>
+            </section>)}
+            {plan.designReview.feedbackDraft && <section>
+              <strong>{plan.designReview.status === 'checking' ? '当前检查意见' : '未完成的检查意见'}</strong>
+              <Markdown>{plan.designReview.feedbackDraft}</Markdown>
+            </section>}
+          </details>}
+          {plan?.designDraft && plan.designReview?.status === 'attention' && <details className="reading-note">
+            <summary>中断前的部分修订（尚未替换完整设计）</summary><Markdown>{plan.designDraft}</Markdown>
+          </details>}
           {progress.active?.id === 'decisions' && (
             <div className="reading-note">
               <span className="typing-indicator">

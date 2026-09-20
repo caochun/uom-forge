@@ -65,6 +65,7 @@ test('reading emits SSE to completion; a consumed request body does not cancel i
   const { server, url } = await serve(async (prompt, options) => {
     assert.match(prompt, /DOCUMENT_ONLY/)
     assert.equal(options.provider, 'gpt')
+    assert.equal(options.reasoningEffort, 'low')
     assert.equal(options.signal?.aborted, false)
     options.onEvent?.({
       type: 'timing',
@@ -87,6 +88,7 @@ test('reading emits SSE to completion; a consumed request body does not cancel i
     const response = await post(url + '/api/analyze/stream', {
       stage: 'understand',
       provider: 'gpt',
+      reasoningEffort: 'low',
       document: { name: 'doc', blocks: [{ id: '1', text: 'DOCUMENT_ONLY' }] },
     })
     const output = events(await response.text())
@@ -158,11 +160,13 @@ test('discussion uses GPT and all API routes reject disabled ACP before inferenc
   const { server, url } = await serve(async (_prompt, options) => {
     calls++
     assert.equal(options.provider, 'gpt')
+    assert.equal(options.reasoningEffort, 'high')
     return '讨论结果'
   })
   try {
     const response = await post(url + '/api/discuss', {
       provider: 'gpt',
+      reasoningEffort: 'high',
       document: { name: 'doc', blocks: [{ id: '1', text: 'DOCUMENT_ONLY' }] },
       messages: [{ role: 'user', content: '解释业务边界' }],
     })
@@ -173,6 +177,32 @@ test('discussion uses GPT and all API routes reject disabled ACP before inferenc
       assert.match(await disabled.text(), /ACP 已停用/)
     }
     assert.equal(calls, 1)
+  } finally {
+    await close(server)
+  }
+})
+
+test('model options are public configuration, and invalid efforts fail before inference on every route', async () => {
+  let calls = 0
+  const { server, url } = await serve(async () => { calls++; return 'must not run' })
+  try {
+    const response = await fetch(url + '/api/models')
+    assert.equal(response.status, 200)
+    const profiles = await response.json()
+    assert.deepEqual(Object.keys(profiles).sort(), ['deepseek', 'glm', 'gpt', 'qwen'])
+    for (const value of Object.values(profiles))
+      assert.deepEqual(Object.keys(value as object).sort(), ['defaultEffort', 'description', 'efforts', 'model'])
+    assert.equal((await post(url + '/api/models', {})).status, 405)
+    for (const route of ['/api/analyze', '/api/analyze/stream', '/api/discuss']) {
+      const response = await post(url + route, {
+        stage: 'understand', provider: 'glm', reasoningEffort: 'none',
+        document: { name: 'doc', blocks: [{ id: '1', text: '业务说明。' }] },
+        messages: [{ role: 'user', content: '解释' }],
+      })
+      if (route !== '/api/analyze/stream') assert.equal(response.status, 400)
+      assert.match(await response.text(), /不支持所选思考强度/)
+    }
+    assert.equal(calls, 0)
   } finally {
     await close(server)
   }

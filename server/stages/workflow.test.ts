@@ -45,8 +45,10 @@ const mapping = () => JSON.stringify({ mappings: [{ factId: 'F1', elementIds: ['
 
 test('understanding audit preserves omissions and unsupported additions with valid provenance', async () => {
   const review = await reviewUnderstanding('材料只能校订一次。', [{ id: 'B1', text: narrative }], async () => JSON.stringify({
-    coverage: [{ id: 'B1', status: 'partial', note: '遗漏重复发生。' }],
-    additions: [{ kind: 'conflict', blockIds: ['B1'], passage: '只能校订一次', note: '原文允许反复校订。' }],
+    gaps: [
+      { kind: 'omission', blockIds: ['B1'], passage: '', note: '遗漏重复发生。' },
+      { kind: 'conflict', blockIds: ['B1'], passage: '材料只能校订一次。', note: '原文允许反复校订。' },
+    ],
   }), 'glm')
   assert.equal(review.status, 'issues')
   assert.deepEqual(review.findings.map(x => x.kind), ['omission', 'conflict'])

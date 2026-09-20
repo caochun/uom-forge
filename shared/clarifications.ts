@@ -141,12 +141,13 @@ export interface ClarificationReview {
 export function reviewModelClarifications(
   plan: string,
   narrative?: string,
+  businessBasis?: string,
 ): ClarificationReview {
   const result: ClarificationReview = { clarifications: [], warnings: [] }
   const range = sectionRange(plan)
   if (!range || /^(?:无[。.]?|无需补充[。.]?)?$/.test(range.body.trim()))
     return result
-  if (narrative === undefined) {
+  if (narrative === undefined && businessBasis === undefined) {
     result.warnings.push(
       '本次仅整理已有建模说明，未重新校验其中的澄清依据；不新增待确认问题，已有问题仍保留在业务理解中。',
     )
@@ -159,8 +160,10 @@ export function reviewModelClarifications(
       const parsed = parseModelClarifications(`## ${CLARIFICATION_SECTION}\n${body}`)
       if (parsed.length !== 1) throw new Error('业务澄清需使用编号列表。')
       const item = parsed[0]
-      if (!containsBasis(narrative, item.basis))
-        throw new Error(`业务澄清“${item.text}”的依据不在当前业务说明中。`)
+      if (businessBasis !== undefined && containsBasis(businessBasis, item.basis))
+        item.basisSource = 'business-basis'
+      else if (narrative === undefined || !containsBasis(narrative, item.basis))
+        throw new Error(`业务澄清“${item.text}”的依据不在${businessBasis === undefined ? '当前业务说明' : '本轮业务依据或文档整理稿'}中。`)
       const key = questionKey(item.text)
       if (seen.has(key)) throw new Error(`业务澄清“${item.text}”重复。`)
       seen.add(key)

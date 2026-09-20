@@ -244,15 +244,21 @@ test('editing the revised narrative retains clarification context and answer cho
   const clarification: BusinessClarification = {
     text: '记录归属如何确定？',
     basis: '记录形成于事项。\n保存时保留关系。',
+    basisSource: 'business-basis',
     ambiguity: '独占记录或共用记录。',
     impact: '影响事项与记录的联系。',
     options: ['独占', '共用'],
     multiple: false,
   }
-  const discovered = receiveClarifications(project(), [clarification], 'assess')
+  const discovered = receiveClarifications(project(), [clarification], 'model')
   const extracted = extractQuestions(discovered.understanding!.narrative)
   assert.deepEqual(
     { multiple: false, ...extracted.at(-1) },
     discovered.understanding!.source.questions.at(-1),
   )
+  const restored = restoreProject(JSON.parse(JSON.stringify(discovered)), project())
+  assert.equal(restored.understanding?.source.questions.at(-1)?.clarification?.basisSource, 'business-basis')
+  const answered = saveUnderstandingAnswers({ ...restored, answers: { 3: '共用' } })
+  assert.match(answered.understanding!.narrative, /已确认说明：共用/)
+  assert.equal(freshness(answered.revisions).plan, true)
 })

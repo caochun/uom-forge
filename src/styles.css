@@ -133,6 +133,23 @@ h4 {
   background: #e4ebf6;
   color: #293e61;
 }
+.provider-switch button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+.reasoning-select {
+  min-height: 27px;
+  border: 1px solid #52637b;
+  border-radius: 5px;
+  padding: 3px 22px 3px 7px;
+  color: #e5ecf7;
+  background: #334359;
+  font-size: 11px;
+}
+.reasoning-select:disabled {
+  cursor: not-allowed;
+  opacity: .7;
+}
 .primary-button,
 .secondary-button,
 .stop-button {
@@ -591,6 +608,31 @@ h4 {
   max-width: 1100px;
   width: 100%;
   align-self: center;
+}
+.reading-reasoning {
+  margin: 16px 20px 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #f8fafd;
+  color: var(--muted);
+  font-size: 12px;
+}
+.reading-reasoning > summary {
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.reading-reasoning > summary span,
+.reading-reasoning > summary small {
+  margin-left: 12px;
+}
+.reasoning-stream {
+  max-height: 240px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  padding: 0 14px 14px;
+  line-height: 1.8;
 }
 .semantic-derivation .muted {
   display: block;

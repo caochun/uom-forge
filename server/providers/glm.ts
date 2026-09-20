@@ -2,6 +2,7 @@ import type { RunTurn } from './types.ts'
 import { createChatCompletionsProvider } from './chat-completions.ts'
 import { timeoutFromEnv } from './lifetime.ts'
 import { requireModelProviderConfig } from './model-config.ts'
+import { selectedReasoning } from './reasoning.ts'
 
 // GLM-5.3-Flash requires thinking, including tool handoff/retry turns.
 // https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash
@@ -33,9 +34,10 @@ export function createGlmProvider(
   fetcher: typeof fetch = fetch,
   env: NodeJS.ProcessEnv = process.env,
 ): RunTurn {
-  return createChatCompletionsProvider(() => {
+  return createChatCompletionsProvider((options) => {
     const config = requireModelProviderConfig('glm', env)
-    const generation = glmGenerationOptions(env)
+    const selected = selectedReasoning('glm', options.reasoningEffort, env)
+    const generation = glmGenerationOptions(selected.effort ? { ...env, GLM_REASONING_EFFORT: selected.effort } : env)
     return {
       provider: 'glm',
       label: config.label,

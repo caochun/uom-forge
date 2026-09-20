@@ -1,3 +1,4 @@
+import { factContext, storyContext } from './semantic-context.ts'
 import { artifactVersion } from '../../shared/workflow.ts'
 import type { ExpressionReview } from '../../shared/expression.ts'
 import type { RunTurn } from '../providers/types.ts'
@@ -291,7 +292,7 @@ export async function organizeBusinessContext(
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await runTurn(
       `把以下已经提取的业务事实组织成业务故事。不得创造事实；每一步必须引用 factIds；故事的 factIds 必须包含其全部步骤引用的事实。同时根据事实选择少量可检验的代表性情形 scenarios，每项包含 id、factIds、statement（要检验的业务事实）、scenario（具体情形）、distinction（需要保留的区别）。没有候选模型输入，不预设对象设计。情形是检验材料而非新增事实，引用只能来自输入 facts。只在业务需要时构造重复发生或不同配对，不机械套场景。只输出一个 JSON 对象，除 stories 外必须包含 scenarios 数组：{"stories":[{"id","name","goal","factIds":[],"steps":[{"order","actor","action","object","condition","result","factIds":[]}]}]}。
-${formatError ? `上次结果未通过程序校验：${formatError}\n请只修正 JSON 结构、步骤顺序或事实引用后重新提交。\n` : ''}事实：${JSON.stringify(facts)}`,
+${formatError ? `上次结果未通过程序校验：${formatError}\n请只修正 JSON 结构、步骤顺序或事实引用后重新提交。\n` : ''}事实：${JSON.stringify(factContext(facts))}`,
       { ...scopedTurn(options, 'semantic'), outputFormat: 'json' },
     )
     try {
@@ -416,8 +417,8 @@ export async function mapFactsToElements(
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await runTurn(
       `将业务事实映射到已经编译的候选领域模型元素。业务故事仅提供上下文，factId 只能引用 facts 的 id，不能填写故事或情形 id。只能使用候选模型中真实存在的 id；每条映射的 elementIds 必须属于同一种 mappingType，不同类型必须拆成多条映射。每个事实至少给出一条映射，无法支撑时使用空 elementIds 和 coverage=missing。只输出一个 JSON 对象：{"mappings":[{"factId","elementIds":[],"mappingType":"object|relation|action|function|rule|activity","explanation","coverage":"full|partial|missing"}]}。
-${formatError ? `上次结果未通过程序校验：${formatError}\n请修正未知 factId、元素 id、映射类型或覆盖结论；合法 factId 为 ${facts.map(f => f.id).join("、")}。\n` : ''}事实：${JSON.stringify(facts)}
-业务故事：${JSON.stringify(stories)}
+${formatError ? `上次结果未通过程序校验：${formatError}\n请修正未知 factId、元素 id、映射类型或覆盖结论；合法 factId 为 ${facts.map(f => f.id).join("、")}。\n` : ''}事实：${JSON.stringify(factContext(facts))}
+业务故事：${JSON.stringify(storyContext(stories))}
 候选模型：${JSON.stringify(modelContext(model))}`,
       { ...scopedTurn(options, 'semantic'), outputFormat: 'json' },
     )

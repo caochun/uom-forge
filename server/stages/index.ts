@@ -15,6 +15,7 @@ export async function runStage(
     ...options,
     provider: request.provider,
     runtime: request.runtime,
+    reasoningEffort: request.reasoningEffort,
   }
   switch (request.stage) {
     case 'understand':
@@ -40,6 +41,8 @@ export async function runStage(
         runTurn,
         configured,
         request.semantic,
+        request.businessBasis,
+        request.designReview,
       )
     case 'narrate':
       return narrateModel(request.model, runTurn, configured)

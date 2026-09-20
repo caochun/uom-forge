@@ -98,6 +98,7 @@ export function receiveClarifications(
       clarification: {
         source,
         basis: item.basis,
+        ...(item.basisSource ? { basisSource: item.basisSource } : {}),
         ambiguity: item.ambiguity,
         impact: item.impact,
       },

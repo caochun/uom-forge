@@ -11,10 +11,11 @@ import { answerText, sameAnswer } from '../understanding.ts'
 import { stripSourceMarkers } from '../../shared/understanding-sources.ts'
 import { SourceCatalogue } from './SourceReferences.tsx'
 import { artifactVersion } from '../../shared/workflow.ts'
+import ReasoningStream from './ReasoningStream.tsx'
 
 interface Props {
   understanding: ReviewedUnderstanding | null
-  stream: { narrative: string; complete: boolean; part: string }
+  stream: { narrative: string; reasoning: string; complete: boolean }
   questionAnswers: QuestionAnswers
   onQuestionAnswerChange: (index: number, answer: QuestionAnswer) => void
   onSubmitAnswers: () => void
@@ -33,30 +34,33 @@ export default function BusinessUnderstanding({
   isSubmitting,
   isLive,
 }: Props) {
-  const narrative = stripSourceMarkers(stream.narrative || understanding?.narrative || '')
+  const narrative = stripSourceMarkers(stream.narrative || (isLive ? '' : understanding?.narrative) || '')
     .replace(/\[\[source:[^\]\r\n]*$/, '')
   const questions =
     isLive || stream.narrative ? [] : understanding?.source.questions || []
   const confirmedAnswers = understanding?.confirmedAnswers || {}
   const confirmedCount = Object.keys(confirmedAnswers).length
   const status = isLive
-    ? '正在阅读与解释'
-    : narrative && !stream.complete && !understanding?.narrative
-      ? '说明尚未完成'
+    ? stream.narrative ? '正在生成整理稿' : stream.reasoning ? '正在思考' : '正在阅读文档'
+    : !stream.complete && (stream.narrative || (!understanding && stream.reasoning))
+      ? '整理稿尚未完成'
       : confirmedCount
         ? '已补充确认说明'
-        : '当前业务说明'
+        : '当前整理稿'
   return (
     <section className="understanding-view">
-      {(narrative || isLive) && (
+      {(narrative || stream.reasoning || isLive) && (
         <article className="reading-narrative panel-surface">
           <div className="panel-toolbar">
             <div>
-              <h2 className="panel-title">业务说明</h2>
-              <div className="panel-subtitle">先读懂业务，再讨论如何建模</div>
+              <h2 className="panel-title">业务文档整理稿</h2>
+              <div className="panel-subtitle">整理文档，发现表述问题；事实与故事在建模的“业务依据”中提炼。</div>
             </div>
             <span className="stage-badge">{status}</span>
           </div>
+          {stream.reasoning && (
+            <ReasoningStream text={stream.reasoning} active={isLive && !stream.complete && !stream.narrative} complete={stream.complete} />
+          )}
           <div className="narrative-body">
             {narrative ? (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -66,7 +70,9 @@ export default function BusinessUnderstanding({
               </ReactMarkdown>
             ) : (
               <p className="narrative-placeholder">
-                正在阅读材料，业务说明将在这里逐步显示……
+                {isLive
+                  ? '文档整理稿生成后将在这里逐步显示……'
+                  : '本次整理稿尚未生成，已保留收到的思考过程。'}
               </p>
             )}
             {isLive && (
@@ -79,21 +85,21 @@ export default function BusinessUnderstanding({
           </div>
           {!isLive && narrative && (
             <p className="reading-note">
-              这份说明是后续建模的业务依据。保存问题答案会更新正文；已确认语义需要进入候选模型，再由模型自述和业务过程支撑检验。
+              请结合原文审阅整理稿和文档问题。保存问题答案会更新整理稿；开始建模后，将据此提炼业务依据，再设计并检查模型。
             </p>
           )}
           {!isLive && !stream.narrative && understanding && <SourceCatalogue sources={understanding.sources} />}
         </article>
       )}
-      {!narrative && !isLive && !understanding && (
+      {!narrative && !stream.reasoning && !isLive && !understanding && (
         <div className="empty-state panel-surface">
-          上传业务文档后开始分析，这里会先展示对业务的完整说明。
+          上传业务文档后开始理解，这里会展示文档整理稿及表述不清、前后矛盾等问题。
         </div>
       )}
       {understanding && understanding.warnings.length > 0 && (
         <div className="panel-surface">
           <div className="narrative-body">
-            <p>业务说明检查</p>
+            <p>整理稿提示</p>
             <ul>
               {understanding.warnings.map((warning) => (
                 <li key={warning}>{warning}</li>
@@ -129,7 +135,7 @@ export default function BusinessUnderstanding({
             <div>
               <strong>问题确认</strong>
               <p>
-                可以只回答部分问题。保存后并入业务说明，未回答的问题继续保留。
+                可以只回答部分问题。保存后并入整理稿，未回答的问题继续保留，并传给业务依据和模型设计。
               </p>
             </div>
             <span
@@ -156,7 +162,7 @@ export default function BusinessUnderstanding({
                     )
                       ? '修改尚未保存'
                       : answerText(confirmedAnswers[index])
-                        ? '已并入业务说明'
+                        ? '已并入整理稿'
                         : '待确认'}
                   </small>
                   {question.clarification && (
@@ -167,7 +173,7 @@ export default function BusinessUnderstanding({
                           : '评估发现'}
                       </span>
                       <dl>
-                        <dt>依据</dt>
+                        <dt>{question.clarification.basisSource === 'business-basis' ? '业务依据中的引文（提炼内容）' : '依据'}</dt>
                         <dd>{question.clarification.basis}</dd>
                         <dt>歧义</dt>
                         <dd>{question.clarification.ambiguity}</dd>
@@ -251,7 +257,7 @@ export default function BusinessUnderstanding({
                   String(questionAnswers?.[index] || '').trim(),
                 ).length
               }{' '}
-              / {questions.length} · 保存后更新业务说明
+              / {questions.length} · 保存后更新整理稿
             </small>
             <button
               className="secondary-button"

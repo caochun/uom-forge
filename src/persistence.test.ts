@@ -6,6 +6,7 @@ import { restoreProject } from './persistence.ts'
 import { reviseUnderstanding, hasUnsavedAnswers } from './understanding.ts'
 import { freshness } from './workspace.ts'
 import { extractUnderstandingSources } from '../shared/understanding-sources.ts'
+import { artifactVersion } from '../shared/workflow.ts'
 
 const empty: Project = {
   version: 4,
@@ -24,6 +25,22 @@ const empty: Project = {
   revisions: initialRevisions,
   messages: [],
 }
+test('interrupted design iteration retains complete design, partial revision and reviewer feedback on reload', () => {
+  const stored: Project = { ...empty, plan: {
+    plan: '完整设计。', complete: true, compiled: false, designDraft: '部分修订',
+    businessBasis: '业务依据。', businessBasisComplete: true,
+    designReview: { status: 'drafting', round: 2, businessBasisVersion: artifactVersion('业务依据。'), rounds: [
+      { design: '完整设计。', verdict: 'revise', feedback: '办理操作缺少前提。' },
+    ] },
+  } }
+  const restored = restoreProject(JSON.parse(JSON.stringify(stored)), empty)
+  assert.equal(restored.plan?.plan, '完整设计。')
+  assert.equal(restored.plan?.complete, true)
+  assert.equal(restored.plan?.designDraft, '部分修订')
+  assert.equal(restored.plan?.designReview?.reason, 'interrupted')
+  assert.equal(restored.plan?.designReview?.rounds[0].feedback, '办理操作缺少前提。')
+  assert.equal(restored.plan?.designReview?.businessBasisVersion, artifactVersion('业务依据。'))
+})
 test('understanding sources and the model’s original basis survive restoration independently', () => {
   const old = extractUnderstandingSources('客户提交。 [[source:b1]]', { name: '旧文档', blocks: [{ id: 'b1', text: '提交申请原文。' }] })
   const current = extractUnderstandingSources('客户撤回。 [[source:b1]]', { name: '新文档', blocks: [{ id: 'b1', text: '撤回申请原文。' }] })
@@ -503,4 +520,20 @@ test('saved confirmations in old drafts become revised understanding once; unsav
   assert.match(editing.understanding!.narrative, /已确认说明：沿用通常方式/)
   assert.doesNotMatch(editing.understanding!.narrative, /已确认说明：单独办理/)
   assert.equal(hasUnsavedAnswers(editing), true)
+})
+
+test('free-text basis and partial design survive a draft round trip without legacy semantic records', () => {
+  for (const complete of [false, true]) {
+    const stored: Project = { ...empty, plan: {
+      plan: '设计没有固定章节。', businessBasis: '事实、故事和情形都可用自然语言描述。',
+      businessBasisComplete: complete, complete: false, compiled: false,
+      basis: { narrative: '本轮业务说明。' },
+    } }
+    const restored = restoreProject(JSON.parse(JSON.stringify(stored)), empty)
+    assert.equal(restored.plan?.businessBasis, stored.plan?.businessBasis)
+    assert.equal(restored.plan?.businessBasisComplete, complete)
+    assert.equal(restored.plan?.plan, stored.plan?.plan)
+    assert.equal(restored.plan?.semantic, undefined)
+    assert.deepEqual(restored.plan?.basis, { narrative: '本轮业务说明。', sources: undefined })
+  }
 })

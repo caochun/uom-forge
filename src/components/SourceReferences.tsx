@@ -18,7 +18,7 @@ export default function SourceReferences({
       )}
       {trace.unlinked && (
         <p className="source-note">
-          {trace.blocks.length || trace.user ? '部分业务说明' : '这段业务说明'}
+          {trace.blocks.length || trace.user ? '部分整理稿内容' : '这段整理稿内容'}
           尚未关联原文。
         </p>
       )}
@@ -48,18 +48,18 @@ export function SourceCatalogue({
   if (!citations.length)
     return (
       <p className="reading-note">
-        本次业务说明尚未关联原文；重新理解业务时将尝试保留段落引用。
+        本次整理稿尚未关联原文；重新理解业务时将尝试保留段落引用。
       </p>
     )
   return (
     <details className="source-catalogue">
-      <summary>查看说明来源 · {citations.length} 段</summary>
+      <summary>查看整理稿的原文引用 · {citations.length} 段</summary>
       <p className="source-note">
         引用用于追溯说明的来源，请结合原文审阅解释是否准确；标为推断的内容仍是推断。
       </p>
       {citations.map((citation, index) => (
         <article key={`${index}-${citation.passage}`}>
-          <strong>业务说明</strong>
+          <strong>整理稿段落</strong>
           <p>{citation.passage}</p>
           <SourceReferences excerpt={citation.passage} sources={sources} />
         </article>

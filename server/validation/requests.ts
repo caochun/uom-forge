@@ -13,6 +13,8 @@ import type { SemanticPlanV2 } from '../../shared/semantic.ts'
 import { parseResumeResult } from './resume.ts'
 import { readUnderstandingReview } from '../../shared/workflow.ts'
 import { validateSemanticPlan } from './semantic.ts'
+import { readDesignReview } from '../../shared/design-review.ts'
+import { parseReasoningEffort } from '../providers/reasoning.ts'
 
 export function parseAnalysisRequest(
   input: unknown,
@@ -21,13 +23,14 @@ export function parseAnalysisRequest(
 ): AnalysisRequest {
   if (!isRecord(input)) throw new Error('请求内容必须是 JSON 对象。')
   const runtime = parseRuntime(input.runtime)
+  const reasoningEffort = parseReasoningEffort(provider, input.reasoningEffort)
+  const selection = { provider, ...(runtime ? { runtime } : {}), ...(reasoningEffort ? { reasoningEffort } : {}) }
   const stage = input.stage ?? defaultStage
   switch (stage) {
     case 'understand':
       validateDocument(input.document)
       return {
-        provider,
-        ...(runtime ? { runtime } : {}),
+        ...selection,
         stage: 'understand',
         document: input.document,
       }
@@ -39,8 +42,7 @@ export function parseAnalysisRequest(
       )
         throw new Error('建模反馈必须是文本。')
       return {
-        provider,
-        ...(runtime ? { runtime } : {}),
+        ...selection,
         stage: 'model',
         narrative: input.narrative,
         model: input.model,
@@ -51,13 +53,16 @@ export function parseAnalysisRequest(
     case 'compile':
       requireText(input.semanticPlan, '建模说明')
       requireText(input.narrative, '业务说明')
+      if (input.businessBasis !== undefined && typeof input.businessBasis !== 'string')
+        throw new Error('业务依据必须是文本。')
       if (input.semantic !== undefined && !isRecord(input.semantic))
         throw new Error('语义计划必须是对象。')
       return {
-        provider,
-        ...(runtime ? { runtime } : {}),
+        ...selection,
         stage: 'compile',
         semanticPlan: input.semanticPlan,
+        ...(input.designReview !== undefined ? { designReview: readDesignReview(input.designReview) } : {}),
+        ...(typeof input.businessBasis === 'string' ? { businessBasis: input.businessBasis } : {}),
         narrative: input.narrative,
         ...(isRecord(input.semantic)
           ? {
@@ -70,19 +75,17 @@ export function parseAnalysisRequest(
       }
     case 'narrate':
       return {
-        provider,
-        ...(runtime ? { runtime } : {}),
+        ...selection,
         stage: 'narrate',
         model: parseCandidateModel(input.model),
       }
     case 'verify':
     case 'map':
       requireText(input.narrative, '业务说明')
-      return { provider, ...(runtime ? { runtime } : {}), stage: stage === 'verify' ? 'verify' : 'map', narrative: input.narrative, result: parseResumeResult(input.result, input.narrative) }
+      return { ...selection, stage: stage === 'verify' ? 'verify' : 'map', narrative: input.narrative, result: parseResumeResult(input.result, input.narrative) }
     case 'assess':
       return {
-        provider,
-        ...(runtime ? { runtime } : {}),
+        ...selection,
         stage: 'assess',
         model: parseCandidateModel(input.model),
       }
@@ -133,5 +136,6 @@ export function parseDiscussionRequest(
   }
   if (!messages.length || messages.at(-1)?.role !== 'user')
     throw new Error('请提供本轮用户问题。')
-  return { provider, document: input.document, model, messages }
+  const reasoningEffort = parseReasoningEffort(provider, input.reasoningEffort)
+  return { provider, ...(reasoningEffort ? { reasoningEffort } : {}), document: input.document, model, messages }
 }

@@ -1,69 +1,54 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { independentlyCheck } from './pi-understanding.ts'
+import { reviewUnderstanding } from '../stages/understanding-review.ts'
 
-test('independent coverage check treats omitted and partial blocks as gaps', async () => {
-  const runTurn = async () =>
-    JSON.stringify({
-      coverage: [
-        { id: 'block-1', status: 'complete', note: '已说明' },
-        { id: 'block-2', status: 'partial', note: '遗漏条件' },
-      ],
-    })
-  const gaps = await independentlyCheck(
-    '说明',
+test('understanding review reports only semantic gaps instead of every complete block', async () => {
+  let prompt = ''
+  const review = await reviewUnderstanding(
+    '材料只能校订一次。',
     [
-      { id: 'block-1', text: '事实一' },
-      { id: 'block-2', text: '事实二' },
-      { id: 'block-3', text: '事实三' },
+      { id: 'block-1', text: '材料可以反复校订。' },
+      { id: 'block-2', text: '校订结果需要保留。' },
     ],
-    runTurn,
-    'deepseek',
-  )
-  assert.deepEqual(gaps.map(({ text, status }) => [text, status]), [
-    ['事实二', 'partial'],
-    ['事实三', 'missing'],
-  ])
-})
-
-test('independent coverage check accepts only complete known blocks', async () => {
-  const runTurn = async () =>
-    JSON.stringify({
-      coverage: [{ id: 'block-1', status: 'complete', note: '已说明' }],
-    })
-  const gaps = await independentlyCheck(
-    '说明',
-    [{ id: 'block-1', text: '事实一' }],
-    runTurn,
-    'gpt',
-  )
-  assert.deepEqual(gaps, [])
-})
-
-test('coverage check uses stable ids and ignores unknown critic entries', async () => {
-  const gaps = await independentlyCheck(
-    '说明',
-    [
-      { id: 'block-1', text: '相同原文' },
-      { id: 'block-2', text: '相同原文' },
-    ],
-    async (prompt) => {
-      assert.match(prompt, /必须原样返回每个输入 id/)
-      assert.match(prompt, /"id":"block-1"/)
+    async value => {
+      prompt = value
       return JSON.stringify({
-        coverage: [
-          { id: 'block-1', status: 'complete', note: '已说明' },
-          { id: 'unknown', status: 'complete', note: '无效记录' },
+        gaps: [
+          { kind: 'omission', passage: '', blockIds: ['block-1'], note: '遗漏重复发生。' },
+          { kind: 'conflict', passage: '材料只能校订一次。', blockIds: [], note: '与原文允许反复校订冲突。' },
         ],
       })
     },
+    'glm',
+  )
+  assert.match(prompt, /只返回确实发现的问题/)
+  assert.doesNotMatch(prompt, /必须原样返回每个输入 id/)
+  assert.doesNotMatch(prompt, /coverage/)
+  assert.equal(review.status, 'issues')
+  assert.deepEqual(review.findings.map(item => item.kind), ['omission', 'conflict'])
+  assert.deepEqual(review.findings[0].blockIds, ['block-1'])
+})
+
+test('an empty gap list passes without requiring complete results for source blocks', async () => {
+  const review = await reviewUnderstanding(
+    '说明',
+    [{ id: 'block-1', text: '事实一' }, { id: 'block-2', text: '事实二' }],
+    async () => JSON.stringify({ gaps: [] }),
+    'gpt',
+  )
+  assert.equal(review.status, 'passed')
+  assert.deepEqual(review.findings, [])
+  assert.deepEqual(review.warnings, [])
+})
+
+test('invalid gap evidence is retained as a warning without blocking the draft', async () => {
+  const review = await reviewUnderstanding(
+    '说明',
+    [{ id: 'block-1', text: '事实一' }],
+    async () => JSON.stringify({ gaps: [{ kind: 'omission', passage: '', blockIds: ['unknown'], note: '缺口' }] }),
     'deepseek',
   )
-  assert.deepEqual(gaps, [
-    {
-      text: '相同原文',
-      status: 'missing',
-      note: '独立评估未返回该原文片段。',
-    },
-  ])
+  assert.equal(review.status, 'incomplete')
+  assert.equal(review.findings.length, 0)
+  assert.match(review.warnings[0], /有效引用/)
 })

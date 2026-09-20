@@ -26,6 +26,7 @@ import type { StagePart } from '../shared/analysis.ts'
 import type { SemanticPlanV2 } from '../shared/semantic.ts'
 import { validateSemanticPlan } from '../shared/semantic-validation.ts'
 import { readUnderstandingSources } from '../shared/understanding-sources.ts'
+import { readDesignReview, interruptDesignReview } from '../shared/design-review.ts'
 
 const stages = ['understand', 'model', 'compile', 'verify', 'map', 'narrate', 'assess'] as const
 const evidence = (value: unknown): Evidence[] =>
@@ -144,6 +145,7 @@ function readUnderstanding(value: unknown): Understanding | null {
                         ? 'model'
                         : 'assess',
                     basis: text(question.clarification.basis),
+                    ...(question.clarification.basisSource === 'business-basis' ? { basisSource: 'business-basis' as const } : {}),
                     ambiguity: text(question.clarification.ambiguity),
                     impact: text(question.clarification.impact),
                   }
@@ -212,7 +214,9 @@ function readAssessment(value: unknown): Assessment | null {
 }
 function readPlan(value: unknown): SemanticPlan | null {
   if (!isRecord(value)) return null
-  const { semantic: storedSemantic, basis: storedBasis, ...rest } = value
+  const { semantic: storedSemantic, basis: storedBasis, businessBasis: storedBusinessBasis, businessBasisComplete: storedBasisComplete,
+    designReview: storedReview, designDraft: storedDraft, ...rest } = value
+  const designReview = interruptDesignReview(readDesignReview(storedReview))
   let semantic: SemanticPlanV2 | undefined
   if (isRecord(storedSemantic)) {
     try {
@@ -224,6 +228,9 @@ function readPlan(value: unknown): SemanticPlan | null {
   return {
     ...rest,
     plan: text(value.plan),
+    ...(designReview ? { designReview } : {}),
+    ...(typeof storedDraft === 'string' ? { designDraft: storedDraft } : {}),
+    ...(typeof storedBusinessBasis === 'string' ? { businessBasis: storedBusinessBasis, businessBasisComplete: storedBasisComplete === true } : {}),
     complete: value.complete === true,
     compiled: value.compiled === true,
     warnings: strings(value.warnings),

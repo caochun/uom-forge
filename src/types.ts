@@ -11,6 +11,7 @@ import type { CandidateModel, Element } from '../shared/model.ts'
 import type { Revisions } from './workspace.ts'
 import type { ExpressionReview } from '../shared/expression.ts'
 import type { SemanticPlanV2 } from '../shared/semantic.ts'
+import type { DesignReview } from '../shared/design-review.ts'
 
 export type AnalysisStage = AnalysisRequest['stage']
 export type WorkspacePage = 'document' | 'understanding' | 'model' | 'review'
@@ -42,7 +43,11 @@ export interface WorkspaceDocument extends BusinessDocument {
 }
 export interface SemanticPlan {
   plan: string
-  // Preserve the actual understanding used for this run, including source
+  designReview?: DesignReview
+  designDraft?: string
+  businessBasis?: string
+  businessBasisComplete?: boolean
+  // Preserve the document reading used to derive this run's businessBasis, including source
   // snapshots; later edits must not rewrite an old fact's provenance.
   basis?: Pick<Understanding, 'narrative' | 'sources'>
   semantic?: SemanticPlanV2

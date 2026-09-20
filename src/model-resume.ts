@@ -35,6 +35,8 @@ export function prepareModelResume(project: Project, step: 'verify' | 'map'): Mo
     }
   }
   return {
+    businessBasis: project.plan.businessBasis,
+    designReview: project.plan.designReview,
     semanticPlan: project.plan.plan, model: candidate.model, expressionReview: review,
     semantic: project.plan.semantic, clarifications: [],
     provenance: { basis: 'business-understanding', evidence: 'unlinked' },

@@ -8,6 +8,14 @@ import {
 } from './responses.ts'
 import type { AnalysisEvent } from '../shared/analysis.ts'
 
+test('design checkpoints accept free text and reject broken metadata without imposing document headings', () => {
+  const value = { type: 'design-review', part: 'semantic', semanticPlan: '任意文本。', review: {
+    status: 'checking', round: 1, rounds: [],
+  } }
+  assert.deepEqual(parseAnalysisEvent(value), value)
+  assert.throws(() => parseAnalysisEvent({ ...value, review: { ...value.review, rounds: [null] } }), /无效事件/)
+})
+
 test('frontend consumes typed SSE split inside UTF-8 and detects a mismatched stage result', async () => {
   const data =
     'data: {"type":"delta","text":"业务说明"}\n\ndata: {"type":"result","result":{"narrative":"模型自述"}}'
@@ -52,4 +60,10 @@ test('malformed transport envelopes and discussion failures are reported explici
   assert.throws(() => discussionText({ error: '调用失败' }), /调用失败/)
   assert.throws(() => discussionText({}), /没有返回文本/)
   assert.equal(discussionText({ text: '业务解释' }), '业务解释')
+})
+
+test('business basis SSE accepts human-readable text without imposing a content schema', () => {
+  const event = { type: 'business-basis', part: 'basis', text: '事实不要求编号，标题也可自由组织。' }
+  assert.deepEqual(parseAnalysisEvent(event), event)
+  assert.throws(() => parseAnalysisEvent({ ...event, text: [] }), /无效事件/)
 })

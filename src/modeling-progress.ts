@@ -1,4 +1,5 @@
 import { artifactVersion } from '../shared/workflow.ts'
+import { designReviewLabel } from '../shared/design-review.ts'
 import type { StagePart } from '../shared/analysis.ts'
 import type { ElementMapping } from '../shared/semantic.ts'
 import type {
@@ -9,6 +10,7 @@ import type {
 } from './types.ts'
 
 export type ModelingStep =
+  | 'basis'
   | 'facts'
   | 'stories'
   | 'decisions'
@@ -54,6 +56,7 @@ export function modelingProgress({
   planStale?: boolean
   candidateStale?: boolean
 }) {
+  if (!plan?.semantic) return textModelingProgress({ plan, candidate, runningPart, planStale, candidateStale })
   const semantic = plan?.semantic
   const facts = semantic?.facts.length || 0
   const storiesReady =
@@ -188,6 +191,7 @@ export function modelingProgress({
     if (step.id === active) {
       step.state = 'active'
       step.detail = {
+        basis: '正在整理业务依据',
         facts: '正在提取事实',
         stories: '正在组织故事',
         decisions: '正在生成设计草案',
@@ -232,6 +236,44 @@ export function modelingProgress({
     oldCandidate,
     reviewStale,
     counts,
+  }
+}
+
+// Semantic iteration belongs to the design tab, not a fourth workflow step.
+function textModelingProgress({ plan, candidate, runningPart, planStale, candidateStale }: {
+  plan: SemanticPlan | null; candidate: CandidateDraft | null; runningPart?: StagePart | '';
+  planStale: boolean; candidateStale: boolean;
+}) {
+  const currentCandidate = Boolean(candidate && (!plan || plan.compiled))
+  const oldCandidate = Boolean(candidate && (!currentCandidate || candidateStale))
+  const active = runningPart === 'basis' ? 'basis' : runningPart === 'semantic' || runningPart === 'design-check' ? 'decisions'
+    : runningPart === 'compile' ? 'compile' : undefined
+  const steps: ProgressItem[] = [
+    { id: 'basis', tab: 'evidence', label: '业务依据',
+      detail: plan?.businessBasisComplete ? '业务依据已生成' : plan?.businessBasis ? '部分内容已保留' : '等待整理',
+      state: plan?.businessBasisComplete ? 'done' : 'waiting' },
+    { id: 'decisions', tab: 'decisions', label: '模型设计',
+      detail: plan?.designReview ? designReviewLabel(plan.designReview) : plan?.complete ? '设计草案已生成' : plan?.plan ? '部分设计已保留' : '等待生成设计',
+      state: plan?.designReview?.status === 'attention' ? 'attention' : plan?.complete ? 'done' : 'waiting' },
+    { id: 'compile', tab: 'model', label: '模型视图',
+      detail: oldCandidate ? '保留上轮模型' : currentCandidate ? `模型 v${candidate!.revision} · 结构检查通过` : '等待生成模型',
+      state: oldCandidate ? 'stale' : currentCandidate ? 'done' : 'waiting' },
+  ]
+  for (const step of steps) {
+    if (planStale && step.tab !== 'model' && step.state !== 'waiting') {
+      step.state = 'stale'; step.detail = step.id === 'basis' ? '业务依据需要更新' : '设计需要更新'
+    }
+    if (step.id === active) {
+      step.state = 'active'
+      step.detail = step.id === 'basis' ? '正在整理业务依据' : step.id === 'decisions'
+        ? plan?.designReview ? designReviewLabel(plan.designReview) : '正在生成设计草案' : '正在生成模型'
+    }
+  }
+  return {
+    steps,
+    tabs: steps.map(step => ({ id: step.tab, label: step.label, state: step.state, detail: step.detail })),
+    active: steps.find(step => step.id === active), oldCandidate,
+    reviewStale: oldCandidate || Boolean(candidate?.edited), counts: null,
   }
 }
 

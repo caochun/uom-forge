@@ -19,7 +19,7 @@ export function questionSection(questions: Question[]): string {
         return [
           `${index + 1}. ${question.text}`,
           context
-            ? `来源：${context.source === 'model' ? '建模' : '评估'}\n依据：${context.basis}\n歧义：${context.ambiguity}\n影响：${context.impact}`
+            ? `来源：${context.source === 'model' ? '建模' : '评估'}\n${context.basisSource === 'business-basis' ? '依据来源：业务依据（提炼内容）\n' : ''}依据：${context.basis}\n歧义：${context.ambiguity}\n影响：${context.impact}`
             : '',
           question.options.length
             ? `${question.multiple ? '多选' : '选项'}：${question.options.join('；')}`
@@ -62,6 +62,11 @@ export function extractQuestions(narrative: string): Question[] {
         ambiguity: '',
         impact: '',
       }
+      continue
+    }
+    if (line === '依据来源：业务依据（提炼内容）' && current?.clarification) {
+      current.clarification.basisSource = 'business-basis'
+      contextField = undefined
       continue
     }
     const detail = /^(依据|歧义|影响)[:：]\s*(.+)$/.exec(line)

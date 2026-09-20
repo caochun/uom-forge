@@ -1,4 +1,4 @@
-import type { RunTurn } from './types.ts'
+import type { RunTurn, TurnOptions } from './types.ts'
 import type { ProviderId } from '../../shared/analysis.ts'
 import { createDeadline } from './lifetime.ts'
 import { readSseData } from './sse.ts'
@@ -17,13 +17,13 @@ interface ChatCompletionsConfig {
 }
 
 export function createChatCompletionsProvider(
-  configure: () => ChatCompletionsConfig,
+  configure: (options: TurnOptions) => ChatCompletionsConfig,
   fetcher: typeof fetch = fetch,
 ): RunTurn {
   return async (prompt, options = {}) => {
     options.signal?.throwIfAborted()
     // Resolve lazily: Vite loads the server environment after module imports.
-    const config = configure()
+    const config = configure(options)
     const { apiKey, model, label } = config
     const baseUrl = config.url.replace(/\/+$/, '')
     const url = /\/chat\/completions$/i.test(baseUrl)

@@ -2,6 +2,8 @@ import type { CandidateModel, Evidence } from './model.ts'
 import type { ExpressionReview } from './expression.ts'
 import type { SemanticPlanV2 } from './semantic.ts'
 import type { UnderstandingReview } from './workflow.ts'
+import type { DesignReview } from './design-review.ts'
+import type { ReasoningEffort } from './reasoning.ts'
 
 export interface BusinessDocument {
   name: string
@@ -15,6 +17,8 @@ export interface Question {
 }
 export interface ClarificationReason {
   basis: string
+  // Assigned by the host after locating the quote, never asserted by the LLM.
+  basisSource?: 'business-basis'
   ambiguity: string
   impact: string
 }
@@ -77,6 +81,7 @@ export interface DiscussionContext {
   review?: string
 }
 export interface ModelingInput {
+  // Reviewed document text. Only basis preparation reads it; design/review use businessBasis.
   narrative: string
   currentModel?: unknown
   feedback?: string
@@ -84,6 +89,8 @@ export interface ModelingInput {
 }
 export interface ModelingResult {
   semanticPlan: string
+  designReview?: DesignReview
+  businessBasis?: string
   semantic?: SemanticPlanV2
   clarifications: BusinessClarification[]
   model: CandidateModel
@@ -127,7 +134,7 @@ export type ProviderEvent =
   | { type: 'delta'; text: string; reasoning?: boolean; size?: number }
   | { type: 'timing'; timing: TurnTiming }
 export type StagePart =
-  'reading' | 'semantic' | 'compile' | 'expression' | 'repair' | 'recheck' | 'mapping'
+  'reading' | 'basis' | 'semantic' | 'design-check' | 'compile' | 'expression' | 'repair' | 'recheck' | 'mapping'
 export type StageEvent =
   | (ProviderEvent & { part?: StagePart })
   | {
@@ -142,15 +149,19 @@ export type StageEvent =
       clarifications: BusinessClarification[]
       warnings: string[]
     }
+  | { type: 'business-basis'; part: 'basis'; text: string }
+  | { type: 'design-review'; part: 'semantic'; review: DesignReview; semanticPlan?: string }
   | { type: 'semantic-plan'; part: 'semantic'; semantic: SemanticPlanV2 }
   | ({ type: 'understanding-narrative' } & Understanding)
   | { type: 'understanding-review'; review: UnderstandingReview }
-export type AnalysisRequest = { provider: ProviderId; runtime?: AgentRuntimeId } & (
+export type AnalysisRequest = { provider: ProviderId; runtime?: AgentRuntimeId; reasoningEffort?: ReasoningEffort } & (
   | { stage: 'understand'; document: BusinessDocument }
   | { stage: 'model'; narrative: string; model?: unknown; instruction?: string; understandingReview?: UnderstandingReview }
   | {
       stage: 'compile'
       semanticPlan: string
+      businessBasis?: string
+      designReview?: DesignReview
       narrative: string
       semantic?: SemanticPlanV2
     }
@@ -161,6 +172,7 @@ export type AnalysisRequest = { provider: ProviderId; runtime?: AgentRuntimeId }
 )
 export interface DiscussionRequest {
   provider: ProviderId
+  reasoningEffort?: ReasoningEffort
   document: BusinessDocument
   model: DiscussionContext
   messages: ChatMessage[]

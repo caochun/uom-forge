@@ -45,7 +45,10 @@ import {
   PROVIDERS,
   RUNTIMES,
 } from '../shared/analysis.ts'
+import type { ModelOptions, ReasoningEffort } from '../shared/reasoning.ts'
+import { REASONING_LABELS } from '../shared/reasoning.ts'
 import { interruptReview, STAGE_PART_LABELS } from '../shared/expression.ts'
+import { designReviewLabel, interruptDesignReview } from '../shared/design-review.ts'
 import type {
   AnalysisStage,
   DiscussionSubject,
@@ -110,7 +113,7 @@ const EMPTY_PROJECT: Project = {
     {
       role: 'assistant',
       content:
-        '上传业务文档后先理解业务。你可以审阅说明、补充问题答案，再开始建模。模型生成后，再通过自述和业务过程支撑检查其表达是否准确。',
+        '上传文档后先整理内容、发现表述问题。你可以修订整理稿或确认问题，再开始建模：提炼业务依据、设计并检查模型，最后生成模型视图。',
     },
   ],
 }
@@ -142,7 +145,7 @@ function App() {
   const [editing, setEditing] = useState(false)
   const [editedNarrative, setEditedNarrative] = useState('')
   const [comparison, setComparison] = useState(false)
-  const [readingText, setReadingText] = useState('')
+  const [readingStream, setReadingStream] = useState({ narrative: '', reasoning: '', complete: true })
   const [narratingText, setNarratingText] = useState('')
   const [modelActivity, setModelActivity] = useState<string[]>([])
   const [job, setJob] = useState<StageJob | null>(null)
@@ -153,7 +156,11 @@ function App() {
   // The workbench defaults to the iterative local workflow. The shared
   // constants remain the protocol/server defaults for API callers.
   const [provider, setProvider] = useState<ProviderId>(DEFAULT_PROVIDER)
-  const [runtime, setRuntime] = useState<AgentRuntimeId>('pi')
+  const runtime: AgentRuntimeId = 'pi'
+  const [modelOptions, setModelOptions] = useState<ModelOptions | null>(null)
+  const [modelOptionsError, setModelOptionsError] = useState(false)
+  const [modelOptionsAttempt, setModelOptionsAttempt] = useState(0)
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('default')
   const busyRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
   const cancelled = useRef(false)
@@ -161,6 +168,19 @@ function App() {
   const messagesRef = useRef<HTMLDivElement | null>(null)
   const followMessages = useRef(true)
   projectRef.current = project
+  useEffect(() => {
+    const controller = new AbortController()
+    setModelOptionsError(false)
+    void fetch('/api/models', { signal: controller.signal })
+      .then(response => response.ok ? response.json() as Promise<ModelOptions> : Promise.reject(new Error('model options unavailable')))
+      .then(options => {
+        if (controller.signal.aborted) return
+        setModelOptions(options)
+        setReasoningEffort(options[provider].defaultEffort)
+      })
+      .catch(() => { if (!controller.signal.aborted) setModelOptionsError(true) })
+    return () => controller.abort()
+  }, [modelOptionsAttempt])
   const stale = freshness(project.revisions)
   const unsavedAnswers = hasUnsavedAnswers(project)
   const pendingQuestions = project.understanding?.questions.length || 0
@@ -233,6 +253,10 @@ function App() {
 
   const execute = async (task: () => Promise<void>) => {
     if (busyRef.current) return
+    if (!modelOptions) {
+      setError('模型选项尚未加载，请稍后重试。')
+      return
+    }
     busyRef.current = true
     cancelled.current = false
     setBusy(true)
@@ -254,6 +278,7 @@ function App() {
     } finally {
       setProject((current) => ({
         ...current,
+        plan: current.plan ? { ...current.plan, designReview: interruptDesignReview(current.plan.designReview) } : null,
         candidate: current.candidate?.expressionReview
           ? {
               ...current.candidate,
@@ -333,7 +358,8 @@ function App() {
       setNarratingText('')
     }
     if (stage === 'assess') setReviewMode('assessment')
-    if (stage === 'understand') setReadingText('')
+    if (stage === 'understand')
+      setReadingStream({ narrative: '', reasoning: '', complete: false })
     if (stage === 'model') {
       setProject((current) => ({
         ...current,
@@ -372,7 +398,7 @@ function App() {
     const response = await fetch('/api/analyze/stream', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...body, stage, provider, runtime }),
+      body: JSON.stringify({ ...body, stage, provider, runtime, reasoningEffort }),
       signal: controller.signal,
     })
     if (!response.ok) {
@@ -431,20 +457,50 @@ function App() {
           ...current,
           outputs: { ...current.outputs, [stage]: output },
         }))
+        if (stage === 'understand') {
+          const field = event.reasoning ? 'reasoning' : 'narrative'
+          setReadingStream(current => ({ ...current, [field]: current[field] + event.text }))
+        }
         if (!event.reasoning) {
-          if (stage === 'understand')
-            setReadingText((current) => current + (event.text || ''))
           if (stage === 'narrate')
             setNarratingText((current) => current + (event.text || ''))
+          if (stage === 'model' && event.part === 'basis')
+            setProject(current => current.plan && !current.plan.businessBasisComplete ? ({
+              ...current, plan: { ...current.plan, businessBasis: (current.plan.businessBasis || '') + event.text },
+            }) : current)
           if (stage === 'model' && event.part === 'semantic')
-            setProject((current) => current.plan?.semantic?.status === 'stories' && !current.plan.complete ? ({
+            setProject((current) => current.plan?.designReview?.status === 'drafting' ? ({
+              ...current, plan: { ...current.plan, designDraft: (current.plan.designDraft || '') + event.text },
+            }) : current.plan && (current.plan.businessBasisComplete || current.plan.semantic?.status === 'stories') && !current.plan.complete ? ({
               ...current,
               plan: {
                 ...current.plan,
                 plan: (current.plan?.plan || '') + (event.text || ''),
               },
             }) : current)
+          if (stage === 'model' && event.part === 'design-check')
+            setProject(current => current.plan?.designReview ? ({
+              ...current, plan: { ...current.plan, designReview: { ...current.plan.designReview,
+                feedbackDraft: (current.plan.designReview.feedbackDraft || '') + event.text } },
+            }) : current)
         }
+      }
+      if (event.type === 'design-review') {
+        setProject(current => ({ ...current, plan: {
+          ...(current.plan || { plan: '', complete: false, compiled: false }),
+          designReview: event.review,
+          ...(event.semanticPlan !== undefined
+            ? { plan: event.semanticPlan, complete: true, compiled: false, designDraft: undefined }
+            : event.review.status === 'drafting' && event.review.round !== current.plan?.designReview?.round
+              ? { designDraft: '' } : {}),
+        }, revisions: { ...current.revisions, planBasis: basis } }))
+      }
+      if (event.type === 'business-basis') {
+        addModelActivity('业务依据已生成。')
+        setProject(current => ({ ...current, plan: {
+          ...(current.plan || { plan: '', complete: false, compiled: false }),
+          businessBasis: event.text, businessBasisComplete: true,
+        }, revisions: { ...current.revisions, planBasis: basis } }))
       }
       if (event.type === 'model-plan') {
         addModelActivity('设计草案已生成，正在编译候选模型。')
@@ -454,7 +510,11 @@ function App() {
               ...current,
               plan: {
                 plan: event.semanticPlan,
+                designReview: current.plan?.designReview,
+                designDraft: current.plan?.designReview?.reason === 'interrupted' ? current.plan.designDraft : undefined,
                 basis: current.plan?.basis,
+                businessBasis: current.plan?.businessBasis,
+                businessBasisComplete: current.plan?.businessBasisComplete,
                 complete: true,
                 compiled: false,
                 warnings: event.warnings,
@@ -526,7 +586,7 @@ function App() {
       }
       if (event.type === 'result') {
         received.result = event.result
-        addModelActivity('本次执行已结束，请查看检查结论及未决事项。')
+        addModelActivity('本次执行已结束，产物已保存。')
       }
     })
     const result = received.result
@@ -578,11 +638,11 @@ function App() {
         questionsSaved: false,
         revisions: advanceRevision(current.revisions, 'understanding'),
       }))
-      setReadingText('')
+      setReadingStream(current => ({ ...current, narrative: '', complete: true }))
       addMessage({
         role: 'assistant',
         content:
-          '业务理解已完成。请审阅说明并补充待确认问题，再点击“开始建模”。',
+          '文档整理已完成。请结合原文审阅整理稿和文档问题；点击“开始建模”后，将提炼业务依据并设计模型。',
       })
     })
   const build = (retry = false) =>
@@ -596,8 +656,10 @@ function App() {
         retry && project.plan
           ? await runStage('compile', {
               semanticPlan: project.plan.plan,
-              narrative: project.understanding?.narrative || '',
+              narrative: resumeNarrative(project),
               semantic: project.plan.semantic,
+              businessBasis: project.plan.businessBasis,
+              designReview: project.plan.designReview,
             })
           : await runStage('model', {
               narrative: project.understanding?.narrative || '',
@@ -625,7 +687,11 @@ function App() {
             ...current,
             plan: {
               plan: result.semanticPlan,
+              designReview: result.designReview,
+              designDraft: result.designReview?.reason === 'interrupted' ? current.plan?.designDraft : undefined,
               basis: current.plan?.basis,
+              businessBasis: result.businessBasis ?? current.plan?.businessBasis,
+              businessBasisComplete: result.businessBasis !== undefined || current.plan?.businessBasisComplete,
               complete: true,
               compiled: true,
               warnings: [...new Set(result.validation.warnings)],
@@ -651,9 +717,12 @@ function App() {
       addMessage({
         role: 'assistant',
         content:
-          (result.expressionReview.status === 'passed'
+          (result.expressionReview.status === 'not-run'
+            ? '候选模型已生成，结构和引用检查通过。'
+            : result.expressionReview.status === 'passed'
             ? '候选模型已生成，本轮业务表达检查用例均可表达。'
             : '候选模型已保留，请查看业务表达检查中的剩余事项。') +
+          (result.designReview?.status === 'attention' ? '设计仍有待审阅意见，请查看“模型设计”。' : '') +
           '可点击“检验模型”查看自述和业务过程支撑。',
       })
     })
@@ -717,7 +786,7 @@ function App() {
         },
         revisions: advanceRevision(current.revisions, 'document'),
       }))
-      setReadingText('')
+      setReadingStream({ narrative: '', reasoning: '', complete: true })
       setEditing(false)
       setView('document')
       addMessage({
@@ -797,6 +866,10 @@ function App() {
   }
   const send = async () => {
     if (!draft.trim() || discussing) return
+    if (!modelOptions) {
+      setError('模型选项尚未加载，请稍后重试。')
+      return
+    }
     const user: WorkspaceMessage = {
       role: 'user',
       content: draft.trim(),
@@ -823,6 +896,7 @@ function App() {
         body: JSON.stringify({
           document: project.document,
           provider,
+          reasoningEffort,
           model: {
             candidate: model,
             understanding: project.understanding?.narrative,
@@ -888,7 +962,7 @@ function App() {
       key: 'answers',
       text: '问题答案有尚未保存的修改；当前正文和讨论仍使用已保存的业务理解。',
       action: {
-        label: '保存并更新业务说明',
+        label: '保存并更新整理稿',
         disabled: busy,
         run: () => {
           setProject(saveUnderstandingAnswers)
@@ -924,14 +998,16 @@ function App() {
       text: stale.plan
         ? '建模依据已变化，这份说明不能直接重试整理，请重新建模。'
         : modelRunning
-          ? '设计草案已生成，正在整理候选模型。'
+          ? project.plan?.designReview && ['drafting', 'checking'].includes(project.plan.designReview.status)
+            ? `完整设计已保留，${designReviewLabel(project.plan.designReview)}。`
+            : '设计草案已生成，正在整理候选模型。'
           : '建模说明已保留，候选模型尚未更新。',
       ...(canRetry && !busy
         ? { action: { label: '重新整理模型', run: () => build(true) } }
         : {}),
     })
   if (view === 'model' && canCheck && project.plan?.compiled) {
-    if (project.candidate?.edited || project.candidate?.expressionReview?.status !== 'passed') todos.push({ key: 'resume-check', text: '使用当前候选检查具体业务情形，保留已有模型及修正记录。',
+    if (project.candidate?.expressionReview?.status !== 'not-run' && (project.candidate?.edited || project.candidate?.expressionReview?.status !== 'passed')) todos.push({ key: 'resume-check', text: '使用当前候选检查具体业务情形，保留已有模型及修正记录。',
       action: { label: '检查并修正当前候选', disabled: busy, run: () => resume('verify') } })
     if (project.plan.semantic && !project.candidate?.edited && project.plan.semantic.status !== 'mapped')
       todos.push({ key: 'resume-map', text: '事实与候选已经保留，可以单独继续映射。',
@@ -1003,15 +1079,14 @@ function App() {
               {(['pi', 'direct'] as AgentRuntimeId[]).map((value) => (
                 <button
                   key={value}
-                  disabled={busy || discussing}
+                  disabled={value === 'direct' || busy || discussing}
                   aria-pressed={runtime === value}
                   className={runtime === value ? 'active' : ''}
                   title={
                     value === 'pi'
                       ? 'Pi Agent 用于业务理解、语义建模和模型 JSON 质量检查。'
-                      : '直接调用当前选择的模型提供方。'
+                      : '直接调用已停用，请使用 Pi Agent。'
                   }
-                  onClick={() => setRuntime(value)}
                 >
                   {RUNTIMES[value].name}
                 </button>
@@ -1024,16 +1099,37 @@ function App() {
               {(['deepseek', 'gpt', 'qwen', 'glm'] as const).map((value) => (
                 <button
                   key={value}
-                  disabled={busy || discussing}
+                  disabled={busy || discussing || !modelOptions}
                   aria-pressed={provider === value}
                   className={provider === value ? 'active' : ''}
-                  onClick={() => setProvider(value)}
+                  title={modelOptions?.[value].model}
+                  onClick={() => {
+                    setProvider(value)
+                    setReasoningEffort(modelOptions![value].defaultEffort)
+                  }}
                 >
                   {PROVIDERS[value].name}
                 </button>
               ))}
             </div>
           </div>
+          <label className="runtime-choice reasoning-choice">
+            <span className="choice-label">推理强度</span>
+            <select
+              className="reasoning-select"
+              aria-label="模型推理强度"
+              value={reasoningEffort}
+              disabled={busy || discussing || !modelOptions || modelOptions[provider].efforts.length < 2}
+              title={modelOptions ? `${modelOptions[provider].model}：${modelOptions[provider].description}` : '正在加载模型可用档位'}
+              onChange={(event) => setReasoningEffort(event.target.value as ReasoningEffort)}
+            >
+              {!modelOptions && <option value="default">{modelOptionsError ? '加载失败' : '加载中…'}</option>}
+              {modelOptions?.[provider].efforts.map((effort) => (
+                <option key={effort} value={effort}>{REASONING_LABELS[effort]}</option>
+              ))}
+            </select>
+          </label>
+          {modelOptionsError && <button className="text-button" onClick={() => setModelOptionsAttempt(value => value + 1)}>重试加载</button>}
           <button
             className="icon-button"
             aria-label="保存草稿"
@@ -1103,7 +1199,7 @@ function App() {
                     setEditing(!editing)
                   }}
                 >
-                  {editing ? '取消修改' : '修正业务说明'}
+                  {editing ? '取消修改' : '修正整理稿'}
                 </button>
               )}
               {view === 'model' && (project.plan || model) && (
@@ -1162,7 +1258,10 @@ function App() {
               <div>
                 <strong>{STAGES[job.stage]}</strong>
                 <small>
-                  {runtimeLabel} · {providerLabel} · {elapsed} 秒 · {job.text}
+                  {runtimeLabel} · {providerLabel} · {elapsed} 秒 · {job.stage === 'understand'
+                    ? readingStream.narrative ? '正在生成文档整理稿。'
+                      : readingStream.reasoning ? '正在梳理文档，思考过程实时显示中。' : job.text
+                    : job.text}
                 </small>
                 {job.timing && (
                   <small>
@@ -1239,11 +1338,11 @@ function App() {
                       questionsSaved: false,
                       revisions: advanceRevision(current.revisions, 'business'),
                     }))
-                    setReadingText('')
+                    setReadingStream({ narrative: '', reasoning: '', complete: true })
                     setEditing(false)
                   }}
                 >
-                  <label htmlFor="business-narrative">修正业务说明</label>
+                  <label htmlFor="business-narrative">修正文档整理稿</label>
                   <textarea
                     id="business-narrative"
                     rows={24}
@@ -1251,23 +1350,19 @@ function App() {
                     onChange={(event) => setEditedNarrative(event.target.value)}
                   />
                   <p>
-                    保存后，已有模型和检验结果会标记需要更新。已并入正文的确认说明会保留；待确认问题将按编辑后的内容重新解析。
+                    保存后，业务依据、模型和检验结果会标记需要更新。请保留必要的条件、公式和未决说法；待确认问题将按编辑后的内容重新解析。
                   </p>
                   <button
                     className="primary-button"
                     disabled={busy || !editedNarrative.trim()}
                   >
-                    保存业务说明
+                    保存整理稿
                   </button>
                 </form>
               ) : (
                 <BusinessUnderstanding
                   understanding={project.understanding}
-                  stream={{
-                    narrative: readingText,
-                    complete: !readingText,
-                    part: 'reading',
-                  }}
+                  stream={readingStream}
                   isLive={job?.stage === 'understand'}
                   questionAnswers={project.answers}
                   onQuestionAnswerChange={(index, value) =>
@@ -1360,7 +1455,7 @@ function App() {
             <section className="feedback-panel panel-surface">
               <label htmlFor="model-feedback">下一轮建模反馈</label>
               <p>
-                明确要调整的业务含义和边界。讨论内容不会自动改动模型；重新建模时使用当前业务说明和这里的反馈。
+                填写对模型设计的调整建议。业务事实或文档含义的修改请先保存到整理稿；重新建模时会重新提炼业务依据，再结合这里的反馈设计模型。
               </p>
               {project.feedback &&
                 project.feedbackDocumentRevision !==

@@ -10,6 +10,7 @@ import {
   parseDiscussionRequest,
 } from './validation/requests.ts'
 import { isRecord, errorMessage } from './validation/values.ts'
+import { publicModelOptions } from './providers/reasoning.ts'
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []
@@ -29,6 +30,16 @@ export function createApiMiddleware(runTurn: RunTurn = runProviderTurn) {
     next: () => void,
   ): Promise<void> => {
     const pathname = (request.url || '').split('?')[0]
+    if (pathname === '/api/models') {
+      response.setHeader('content-type', 'application/json; charset=utf-8')
+      response.setHeader('cache-control', 'no-store')
+      if (request.method !== 'GET') {
+        response.statusCode = 405
+        response.setHeader('allow', 'GET')
+        response.end(JSON.stringify({ error: 'Method Not Allowed' }))
+      } else response.end(JSON.stringify(publicModelOptions()))
+      return
+    }
     if (
       !['/api/analyze', '/api/analyze/stream', '/api/discuss'].includes(
         pathname,
@@ -77,7 +88,7 @@ export function createApiMiddleware(runTurn: RunTurn = runProviderTurn) {
           input.model,
           input.messages,
           runTurn,
-          { provider, signal: controller.signal },
+          { provider, reasoningEffort: input.reasoningEffort, signal: controller.signal },
         )
         if (!controller.signal.aborted) response.end(JSON.stringify({ text }))
       } else {

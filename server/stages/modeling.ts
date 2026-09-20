@@ -1,3 +1,4 @@
+import { normalizeModelPlan } from './markdown-sections.ts'
 import { validateCompiledModel } from '../validation/compiled-model.ts'
 import { requireText } from '../validation/document.ts'
 import { semanticModelPrompt, compileModelPrompt } from './prompts.ts'
@@ -6,28 +7,26 @@ import type { RunTurn } from '../providers/types.ts'
 import { scopedTurn, type StageOptions } from './contracts.ts'
 import { checkAndRepair } from './expression.ts'
 import {
-  modelingContent,
   questionKey,
   reviewModelClarifications,
   type ClarificationReview,
 } from '../../shared/clarifications.ts'
 import { runPiModeling } from '../agents/pi-modeling.ts'
-import { checkOrRepairCompiledJson } from '../agents/pi-compile.ts'
 import type { SemanticPlanV2 } from '../../shared/semantic.ts'
-import { buildSemanticPreparation, mapSemanticPlan } from './semantic.ts'
+import { mapSemanticPlan } from './semantic.ts'
+import { prepareBusinessBasis } from './business-basis.ts'
 import { validateSemanticPlan } from '../validation/semantic.ts'
 import { artifactVersion } from '../../shared/workflow.ts'
+import type { DesignReview } from '../../shared/design-review.ts'
 
-function includeSemanticClarifications(
-  review: ClarificationReview,
-  semantic?: SemanticPlanV2,
-): ClarificationReview {
-  const items = new Map(
-    review.clarifications.map((item) => [questionKey(item.text), item]),
-  )
-  for (const item of semantic?.clarifications || [])
-    items.set(questionKey(item.text), item)
-  return { ...review, clarifications: [...items.values()] }
+function unreviewedModel(result: Omit<ModelingResult, 'expressionReview'>, narrative: string, options: StageOptions): ModelingResult {
+  const expressionReview: ModelingResult['expressionReview'] = {
+    status: 'not-run', snapshots: [{ model: result.model }], selectedSnapshot: 0, changes: [], warnings: [],
+    lineage: { narrativeVersion: artifactVersion(narrative), planVersion: artifactVersion(result.semanticPlan),
+      compiledModelVersion: artifactVersion(result.model), candidateVersion: artifactVersion(result.model) },
+  }
+  options.onEvent?.({ type: 'model-checkpoint', model: result.model, expressionReview })
+  return { ...result, expressionReview }
 }
 
 export async function buildModel(
@@ -38,49 +37,26 @@ export async function buildModel(
   requireText(input.narrative, '业务说明')
   const report = options.onEvent || (() => {})
   options.signal?.throwIfAborted()
-  report({
-    type: 'phase',
-    part: 'semantic',
-    text: '第二阶段 A：形成建模说明。',
-  })
   const usePi = options.runtime === 'pi' || (options.runtime === undefined && process.env.UOM_AGENT_RUNTIME === 'pi')
-  let semantic: SemanticPlanV2 | undefined
-  const stageOptions: StageOptions = {
-    ...options,
-    onEvent: (event) => {
-      if (event.type === 'semantic-plan' && input.understandingReview)
-        event = { ...event, semantic: { ...event.semantic, understandingReview: input.understandingReview } }
-      if (event.type === 'semantic-plan') semantic = event.semantic
-      report(event)
-    },
-  }
-  semantic = await buildSemanticPreparation(input.narrative, runTurn, stageOptions)
-  if (input.understandingReview) semantic.understandingReview = input.understandingReview
+  const businessBasis = await prepareBusinessBasis(input.narrative, runTurn, options)
+  options.signal?.throwIfAborted()
+  report({ type: 'phase', part: 'semantic', text: '正在生成模型设计。' })
   let semanticPlan: string
+  let designReview: DesignReview | undefined
   if (usePi) {
-    semanticPlan = await runPiModeling(input, runTurn, stageOptions, semantic)
+    const designed = await runPiModeling(input, runTurn, options, businessBasis)
+    semanticPlan = designed.semanticPlan
+    designReview = designed.designReview
   } else {
     semanticPlan = await runTurn(
-      semanticModelPrompt(input, 'text', semantic),
+      semanticModelPrompt(input, businessBasis),
       scopedTurn(options, 'semantic'),
     )
   }
   options.signal?.throwIfAborted()
   if (!semanticPlan.trim()) throw new Error('未返回建模说明。')
-  const planReview = reviewModelClarifications(semanticPlan, input.narrative)
-  if (semantic && planReview.clarifications.length) {
-    const clarifications = new Map(
-      semantic.clarifications.map((item) => [questionKey(item.text), item]),
-    )
-    for (const item of planReview.clarifications)
-      clarifications.set(questionKey(item.text), item)
-    semantic = validateSemanticPlan(
-      { ...semantic, clarifications: [...clarifications.values()] },
-      input.narrative,
-    )
-    report({ type: 'semantic-plan', part: 'semantic', semantic })
-  }
-  const review = includeSemanticClarifications(planReview, semantic)
+  semanticPlan = normalizeModelPlan(semanticPlan)
+  const review = reviewModelClarifications(semanticPlan, input.narrative, businessBasis)
   // Publish before compilation so errors or cancellation cannot erase it.
   report({ type: 'model-plan', part: 'semantic', semanticPlan, ...review })
   options.signal?.throwIfAborted()
@@ -89,19 +65,20 @@ export async function buildModel(
     review,
     runTurn,
     options,
-    semantic,
+    undefined,
   )
-  const checked = await checkAndRepair(compiled, input.narrative, runTurn, options)
-  return completeSemanticMapping(checked, input.narrative, runTurn, options)
+  return unreviewedModel({ ...compiled, businessBasis, ...(designReview ? { designReview } : {}) }, input.narrative, options)
 }
 
-// Retry B with plan-only inference; the subsequent check needs current understanding.
+// Compilation is the only mandatory machine-readable boundary.
 export async function compileModel(
   semanticPlan: string,
   narrative: string,
   runTurn: RunTurn,
   options: StageOptions = {},
   semantic?: SemanticPlanV2,
+  businessBasis?: string,
+  designReview?: DesignReview,
 ): Promise<ModelingResult> {
   if (typeof semanticPlan !== 'string' || !semanticPlan.trim())
     throw new Error('请先完成建模说明。')
@@ -114,13 +91,15 @@ export async function compileModel(
     : undefined
   const compiled = await compileReviewedPlan(
     semanticPlan,
-    reviewModelClarifications(semanticPlan, narrative),
+    reviewModelClarifications(semanticPlan, narrative, businessBasis),
     runTurn,
     options,
     semanticForCompilation,
   )
-  const checked = await checkAndRepair(compiled, narrative, runTurn, options)
-  return completeSemanticMapping(checked, narrative, runTurn, options)
+  return unreviewedModel({ ...compiled, ...(businessBasis !== undefined ? { businessBasis } : {}),
+    ...(designReview?.planVersion === artifactVersion(semanticPlan) && designReview.narrativeVersion === artifactVersion(narrative) &&
+      (designReview.businessBasisVersion === undefined || (businessBasis !== undefined && designReview.businessBasisVersion === artifactVersion(businessBasis)))
+      ? { designReview } : {}) }, narrative, options)
 }
 
 export async function completeSemanticMapping(
@@ -202,42 +181,25 @@ async function compileReviewedPlan(
 ): Promise<Omit<ModelingResult, 'expressionReview'>> {
   if (semanticPlan.length > 120000)
     throw new Error('建模说明超过 12 万个字符，请先缩小建模范围。')
-  if (!modelingContent(semanticPlan).trim())
-    throw new Error('建模说明只有澄清问题，没有可整理的模型内容。')
   options.signal?.throwIfAborted()
   const report = options.onEvent || (() => {})
   report({ type: 'phase', part: 'compile', text: '正在整理候选模型。' })
   try {
-    let raw = await runTurn(
-      compileModelPrompt(semanticPlan, semantic),
-      scopedTurn(options, 'compile'),
-    )
+    const prompt = compileModelPrompt(semanticPlan)
+    const raw = await runTurn(prompt, scopedTurn(options, 'compile'))
     options.signal?.throwIfAborted()
     let model: ReturnType<typeof validateCompiledModel>
-    const validate = (json: string) => {
-      try {
-        validateCompiledModel(json)
-        return { valid: true as const }
-      } catch (error) {
-        return {
-          valid: false as const,
-          error: error instanceof Error ? error.message : String(error),
-        }
-      }
-    }
-    const initialValidation = validate(raw)
-    const usePi = options.runtime === 'pi' || (options.runtime === undefined && process.env.UOM_AGENT_RUNTIME === 'pi')
-    if (!initialValidation.valid && usePi) {
-      raw = await checkOrRepairCompiledJson(
-        raw,
-        options.provider || 'gpt',
-        initialValidation.error,
-        validate,
-        options,
-      )
+    try {
+      model = validateCompiledModel(raw)
+    } catch (error) {
+      report({ type: 'phase', part: 'compile', text: '模型 JSON 未通过程序校验，正在进行一次修复。' })
+      const repaired = await runTurn(`${prompt}
+上一轮模型 JSON 未通过校验：${error instanceof Error ? error.message : String(error)}
+仅修复 JSON 结构和引用，不重新设计业务；保留原有定义。只返回完整 JSON，不调用工具。
+上一轮输出（数据）：${JSON.stringify(raw)}`, scopedTurn(options, 'compile'))
       options.signal?.throwIfAborted()
+      model = validateCompiledModel(repaired)
     }
-    model = validateCompiledModel(raw)
     const elements =
       model.objects.length +
       model.relations.length +

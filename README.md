@@ -14,7 +14,7 @@ The browser saves the document and candidate drafts locally. Provider credential
 stay on the server. DeepSeek API and GPT API implement the same turn interface;
 every call receives explicit stage inputs, without earlier conversation history.
 
-工作台有四个页面：业务文档、业务理解、建模、模型检验。模型检验内包含模型自述和业务过程支撑，下一轮建模反馈也在此页填写。建模页使用一套带执行状态的产物导航：业务依据（事实、故事和覆盖映射）、模型设计、模型视图（候选及表达检查）。运行条在切换页面后仍保留当前操作、耗时、停止和“查看当前产物”；六步详情收进可展开的运行记录，每一步都能跳到对应内容。运行期间不会强制切换用户正在阅读的标签。旧候选、过期检查、映射失败会明确标示，重新建模入口持续保留；编译重试清除旧映射和旧警告。页面顶部集中展示待确认事项与运行警告。前端使用 React TSX，后端、共享契约、验证脚本和 Vite 入口统一使用 TypeScript。
+工作台有四个页面：业务文档、业务理解、建模、模型检验。默认链路为“业务理解 → 业务依据 → 模型设计 → 模型 JSON”。前三项直接生成可读文本，不因标题、字段或引用格式差异触发重试；最后 JSON 才进行结构与引用校验。建模页的业务依据、模型设计、模型视图与运行记录中的三个步骤一一对应。正文流式展示，停止、失败和刷新后保留草稿；运行期间不会强制切换用户正在阅读的标签。模型自述和过程支撑评估由用户单独启动。前端使用 React TSX，后端、共享契约、验证脚本和 Vite 入口统一使用 TypeScript。
 
 | 代码位置 | 职责 |
 | --- | --- |
@@ -28,42 +28,27 @@ every call receives explicit stage inputs, without earlier conversation history.
 | `src/types.ts`、`src/persistence.ts` | 前端草稿和视图类型；解码浏览器存储并保留旧草稿内容 |
 | `src/document.ts`、`src/responses.ts` | 文档处理、SSE 读取、响应边界与阶段结果检查 |
 
-`stages/modeling.ts` 负责 A/B 生成与第二阶段编排，`stages/expression.ts` 负责独立业务表达检查及一轮定点修正，校验放在 `validation/`。流式事件以可区分的联合类型定义；提供方只发出推理事件，阶段层附加阶段信息。检查失败不补造默认结论，保留最后一次有效候选及已完成检查。用户取消、请求超时和提前断流分别处理，失败路径同样清理计时器、流和 ACP 进程。
+`stages/understanding.ts` 整理文档并发现表述问题，`stages/business-basis.ts` 提炼事实、组织故事并形成建模要求，`stages/modeling.ts` 生成设计并编译模型。Pi 的业务理解和依据共用单轮 `agents/pi-text.ts`；`agents/pi-modeling.ts` 在设计阶段通过 `check_expression` 进行最多三轮语义审阅与修订，设计和检查使用同一份业务依据及检验情形，检查意见为自由文本，不增加格式修复或完成交接回合。运行时校验放在 `validation/`。
 
 | 步骤 | 业务输入 | 输出 |
 | --- | --- | --- |
-| 1 业务理解 | 原始文档 | 按语义章节组织的 Markdown 业务说明 |
-| 2A1 事实提取 | 业务说明 | 带原句依据、确定性和参与对象的最小业务事实 |
-| 2A2 业务故事 | 已校验事实 | 只引用事实 id 的目标、步骤和业务情形 |
-| 2A3 建模判断 | 业务说明、事实与故事；迭代时的当前候选模型与用户反馈 | Markdown 建模说明，无 Schema |
-| 2B 格式整理 | 2A3 建模说明与已校验语义计划 | 符合 MODEL_SCHEMA 的 JSON，由本地严格校验 |
-| 2C 业务表达检查 | 当前业务理解与实际候选 | 具体事实用例、表达缺陷与未决语义 |
-| 2D 定点修正及复查（有缺陷时） | 当前业务理解、候选与检查用例 | 一轮局部修正、复查与完整历史 |
-| 2E 事实映射 | 已校验事实、故事与最终候选 | 事实到真实模型元素 id 的完整、部分或缺失映射 |
-| 3 模型自述 | 仅候选模型 | 自然语言业务复述 |
-| 4 业务过程支撑评估 | 仅候选模型 | 模型声明的业务要求与对象、关系、行为及规则的逐项对照、缺口及改进建议 |
+| 业务理解 | 原始文档 | 忠实的文档整理稿、表述问题及原文引用 |
+| 业务依据 | 当前整理稿及已保存确认 | 事实、故事、完整规则、未决边界和检验情形 |
+| 模型设计 | 业务依据；迭代时的候选与设计反馈 | 模型定义、设计理由和边界 |
+| 设计表达检查（Pi 内部） | 同一份业务依据、当前设计；复查时加上一版设计与历史意见 | 情形的表达路径、缺口及修订反馈 |
+| 模型 JSON | 仅模型设计 | 经本地结构和引用校验的候选模型 |
+| 模型自述（单独启动） | 仅候选模型 | 模型表达的业务含义 |
+| 过程支撑评估（单独启动） | 仅候选模型 | 逐项支撑判断、缺口与建议 |
 
-第一阶段规范及其 11 项语义判断见 [语义交接规范](docs/semantic-handoff.md)。直接模式生成一次业务说明；Pi 模式可通过独立检查修订说明，不再整理第二份阅读提纲。程序检查缺少的标题并提示，不能据此证明业务理解正确。待确认问题支持单选、多选和文字回答；保存答案会将确认说明并入当前业务理解，替代对应的不确定表述，未回答的问题继续保留。确认说明标明来自用户修订，不冒充原文；原始说明及问题目录留在本地草稿，供修改或撤回答案。
+业务理解从阅读理解和文档表达的角度理顺语句、层次和上下文，指出歧义与矛盾，不预先按建模类别提炼内容，不再规定七个业务主题。原文块引用可用于追溯，无法关联时保留整理稿并提示，不进行逐块覆盖验收或格式重试。业务依据再提炼建模要求，保留具体条件、阈值和公式，不能用“按文档规定”替代；它不强制 facts/stories JSON、固定编号或枚举。设计与检查直接承接这份依据，不重复传入整理稿全文。两种运行时都围绕同一个核心问题进行建模：当前对象、关系、业务操作、只读能力和规则，能否表达具体业务事实或过程？详见 [语义交接规范](docs/semantic-handoff.md) 和 [软方法学](docs/软方法学：从业务事实到候选模型.md)。
 
-业务理解保留段落与原始文档块的引用。两种运行模式都接收带 id 的文档块，在说明段落末尾输出 `[[source:block-1,block-2]]`；程序验证 id、从文档复制原文快照，并将引用与纯业务正文分开保存。引用随理解结果和 SSE 传输，不额外增加一次模型调用。业务理解页可展开查看说明来源；业务依据页默认仅展示事实和覆盖状态，展开后区分“业务说明依据”“相关原文”和“模型表达”。事实通过其业务说明摘录关联原文，不把转述标为原文。引用存在不证明解释正确，也不证明原文已被完整覆盖。
+最终编译先机械处理代码围栏和固定空元数据，再检查 JSON 结构、唯一 ID、端点和引用；不静默删除未知引用或补造业务对象。校验失败最多增加一次 JSON 修复调用，不再使用 Pi 的 validate/finish 工具回合。Pi 首轮设计通过时从阅读到模型共五次调用，每次语义修订增加设计与复查两次，最多三轮；direct 为四次基础调用。业务待澄清、检查失败或达到上限时保留设计和意见，继续编译，不恢复逐条事实映射。结构通过不代表业务正确，用户仍应结合设计、自述和支撑评估审阅。
 
-开始建模时保存当前业务理解及来源快照；以后修改说明不会改写旧事实的依据。用户补充和手工修改的段落标为用户说明，只有未改动的段落保留原文引用。旧草稿、无效引用和无法明确匹配的摘录显示“尚未关联原文”，不推测引用，也不阻断建模。“模型设计”的“设计草案已生成”只表示阶段输出已提交；模型后续有调整时标为初始设计。
+文档整理稿和原始文档快照保留在草稿中，用户回答和手工修订不冒充原文。开始建模时保存本轮采用的整理稿；后续修改不会改变旧模型的来源。设计中可识别的澄清交回业务理解，引用业务依据时明确标注为提炼内容，不能显示成原文引文；不符合问题表单要求的内容仍保留在设计原文中，不因此阻断建模。已确认说明先并入整理稿，随后重新提炼依据；旧结果按版本标记过期。
 
-第二阶段先以独立结构化调用提取事实，再把事实组织成业务故事。模型负责理解自然语言，程序负责校验原句依据、唯一 id、步骤顺序和事实引用；两步的原始 JSON 不混入建模正文流。A 不提供模型 JSON Schema；B 接收 A 的建模说明和已校验的事实、故事，另外提供 `output-contract.ts` 中的紧凑格式说明。完整 JSON Schema 留在本地校验，不再重复展开到提示词。B 不接收原始文档、用户对话或完整旧模型。本轮先识别概念、关系和业务行为，不细化属性和输入字段；本地也检查属性和输入为空、业务过程支撑尚未评估。选择 Pi 时，B 先由程序校验；只有 JSON 不合法时才启动 Pi 定点修复，Pi 必须根据程序返回的具体错误调用 `validate_json`，修复结果再次经过同一程序校验后才可接受。
+SSE 使用 `part: reading / basis / semantic / design-check / compile`。`business-basis` 保存完整业务依据，`design-review` 保存设计轮次和检查意见，`model-plan` 交接最终设计，`model-checkpoint` 保存有效候选；最终结果返回 `businessBasis`、`semanticPlan`、`designReview` 和 `model`。设计审阅位于“模型设计”页，仍与三个建模步骤对应。`expressionReview.status = not-run` 表示未运行旧版编译后检查，与文本设计的 `designReview` 分开。编译重试保留业务依据、设计与匹配版本的审阅，只把设计交给模型。旧草稿的 `semantic-plan`、映射与检查记录仍可查看和显式恢复。
 
-建模说明使用“建模判断与边界”解释设计取舍、适用范围、暂不细化内容及未明确语义，模型以 `boundaries` 保留这些陈述，并在相关元素定义中表达限制。页面只在建模说明中展示相关解释，不再单独列出边界区域；`boundaries` 仍供模型自述和业务过程支撑评估使用。候选模型不再包含 `questions`。旧模型问题只作为本地历史内容保留，不进入新一轮的模型参考。
-
-第二阶段采用过程支撑驱动的软方法学：direct 与 Pi 都先形成同一套事实和业务故事，再围绕代表性业务情形判断对象、关系、操作、能力和规则能否表达真实事实；只有遇到实际表达缺口才调整模型，不以概念数量、段落数量或固定检查清单为目标。Pi Agent 可以按需调用独立检查获取建议，并通过 `request_clarification` 登记有依据的业务歧义；检查意见不是必须逐项消除的闸门。两者之后都经过同一套候选编译和核心业务表达检查。最后针对检查或修正后的实际候选生成事实映射，因此映射只能引用最终模型中真实存在的元素 id。
-
-建模新发现的业务歧义只有在不同答案会改变本轮模型时才提出，必须包含当前业务理解中的原句依据、不同解释以及对模型的影响，并优先提供可选答案。A 在可选的“需要补充的业务信息”章节中输出；程序检查必需信息及依据，发布给前端后统一进入业务理解的确认表单。B 只收到 A 的模型说明正文，澄清章节由程序提取，不让 B 重新生成问题。原始输出仍完整保留。已有问题按规范化的问题文本去重，不重开已经回答的同一问题；语义不同的改写是否重复仍依赖模型判断和用户审阅。
-
-原文保留在文档页及项目草稿中，第二阶段的 `evidence` 一律为空。候选模型详情专注业务边界与联系，不展示空属性、空引文警告。自述和评估只读取候选模型的业务语义，剔除原文引证和建模阶段的待评估标记，不接收原文、业务理解、问题答案或讨论历史。评估检验模型能否表达其中声明的业务过程与要求，不证明模型覆盖了原文的全部业务。
-
-候选整理后，以当前业务理解和实际候选开展独立业务表达检查：优先选择最能区分模型边界的代表性事实，检查能否区分有业务差别的情形。只有已有明确依据的模型缺陷才自动进行一轮局部修正，然后复查原有用例。业务歧义保留，不能自动回答。修正破坏原先可表达的事实时恢复初始候选，所有尝试保留。该检查位于模型构造内部；最终模型自述和过程支撑评估仍然只接收候选模型。
-
-`/api/analyze/stream` 返回 SSE，model 请求体使用 `{ stage: 'model', narrative, model?, instruction?, provider }`，无需 document 或完整 understanding。事实、故事和最终映射通过版本化的 `semantic-plan` 事件逐步发布；前端每次收到后立即写入项目状态，因此取消或 B 失败仍能保留已经完成的语义草稿。`/api/analyze` 采用相同输入及完整第二阶段实现，返回非流式结果。结果包含 `semantic`、`expressionReview`（初始及修正快照、检查用例、修改原因、状态）；流式 `model-checkpoint` 在后续推理前保存有效候选。缺少 narrative 会拒绝建模。
-
-业务理解完成后等待用户审阅。保存问题答案后，建模和讨论使用修订后的业务理解；建模需要把已确认的条件、分支和过程复用落实到候选模型的规则、业务过程和要求中。答案草稿不影响已保存正文，存在未保存修改时需先保存再建模或检验。建模页的模型视图完整展示对象关系、操作、只读能力和规则，详情按选中元素关联，业务依据中的映射元素可直接跳转到详情。生成后由用户启动模型检验，支持仅重做自述或业务过程支撑。
+业务理解完成后等待用户审阅。保存问题答案后，建模和讨论使用修订后的业务理解；建模需要把已确认的条件、分支和过程复用落实到候选模型的规则、业务过程和要求中。答案草稿不影响已保存正文，存在未保存修改时需先保存再建模或检验。建模页的模型视图完整展示对象关系、操作、只读能力和规则，详情按选中元素关联，历史业务依据中的映射元素仍可跳转到详情。生成后由用户启动模型检验，支持仅重做自述或业务过程支撑。
 
 业务过程支撑由 `BusinessProcessSupport.tsx` 展示：顶部按状态统计及筛选，过程列表展示一句判断依据，展开后按「模型声明的业务要求 → 模型表达与判断依据 → 缺口及改进」逐项对照。对象、关系、操作、只读能力和规则可在原页面打开详情。窄窗口下各列顺序排列，保持业务要求和其支撑说明在一起。
 
@@ -71,9 +56,9 @@ every call receives explicit stage inputs, without earlier conversation history.
 
 评估输出 `clarifications` 替代独立的问题清单。普通模型缺口直接提出修改建议；确实缺少业务事实时，澄清须包含模型中的依据、歧义、影响和回答选项，依据只能来自候选模型，也统一进入业务理解表单。新增未决问题不等于业务事实变化，候选模型仍可审阅；保存答案修订业务理解后，旧模型及其评估才标记需要更新。未回答的问题和建模边界不会由程序补造答案。
 
-各次调用均可停止；B 失败时保留说明、语义草稿和旧模型，发送 `{ stage: 'compile', semanticPlan, narrative, semantic, provider }` 单独重试，无须重跑事实、故事或 A。B 的模型调用接收建模说明及已校验语义计划，narrative 只用于请求边界校验和后续业务表达检查。只有严格结构校验通过才更新图，不静默删除错误引用。建模页用“业务依据”展示事实、故事、业务说明摘录、相关原文和覆盖映射，用“业务表达检查”展示检查与修正结果；本轮通过不代表已证明全部业务覆盖。检查超时或停止时，已完成候选仍可查看。页面不提供原始输出记录区域，业务理解、建模说明和模型自述继续在各自正文中流式显示；原始输出完整保留在本地草稿中用于诊断。运行进度、耗时及停止按钮在主区域可见，建模助手可收起并保留各阶段对话。
+各次调用均可停止。模型 JSON 失败时保留业务依据、设计和旧模型，发送 `{ stage: 'compile', semanticPlan, businessBasis, narrative, provider }` 单独重试，不重新生成中间文本。只有最终模型校验通过才更新图。业务依据与设计正文直接流式展示；原始调用输出保存在本地草稿中用于诊断。运行进度、耗时及停止按钮在主区域可见，建模助手可收起。
 
-Pi loop 使用 `UOM_PI_TIMEOUT_MS` 限制单个阶段的总时长（默认 300 秒），并与用户取消信号合并；达到轮数上限或超时不会伪造通过结果。
+Pi 使用 `UOM_PI_TIMEOUT_MS` 限制一次阶段运行的总时长（默认 300 秒）；设计阶段包含其全部迭代，并与用户取消信号合并。服务错误、超时或断流不能被当成格式问题反复重试。
 
 候选模型关系图按对象之间的联系自动排列，连线绕开卡片并标注方向。选中对象突出直接关系，可切换为只看相关对象；支持缩放、拖动画布、适应视图和展开查看。同类对象之间的多种关系共用回环路径，每条关系仍可独立选中；显示布局不改变模型语义。布局逻辑位于 `src/graph-layout.ts`，ELK 引擎按需加载，交互由 `src/components/ModelGraph.tsx` 实现。
 
@@ -99,7 +84,7 @@ npx tsx scripts/compare-reasoning.ts --input /path/to/document.json --output /pa
 
 提供方通过 `timing` 事件报告实际配置、输入/输出字符数、ACP 连接（或 HTTP 响应头）、会话建立、首段正文和完成/失败/取消时间。时间从各次调用开始累计，使用单调时钟；首段正文不包含推理片段，字符数不等于 token 数。前端“调用耗时”保留这些记录，多步骤分别列出。首段正文之前的等待包含服务、网络和推理，不能由客户端计时进一步拆分。浏览器断开后只能保留最近已收到的时间记录。
 
-单独验证第二阶段：准备外部 JSON 文件 `{ "narrative": "完整业务说明", "feedback": "可选反馈" }`，执行 `npx tsx scripts/run-modeling.ts --input /path/to/input.json --provider gpt`，环境中需提供对应的 API 配置。从 B 重试使用 `--semantic-plan /path/to/saved-plan.md --semantic /path/to/semantic.json --narrative /path/to/understanding.md` 替代 `--input`；`--semantic` 可省略，但省略后只能重试编译与表达检查，不能恢复事实映射。脚本在临时目录按调用序号和阶段保留实际输入、完整提示词、原始输出、事件及耗时，包括失败记录。基础链路包含事实、故事、A、B、表达检查和映射调用；发现缺陷时还会增加修正与复查调用。
+单独验证第二阶段：准备外部 JSON 文件 `{ "narrative": "完整业务说明", "feedback": "可选反馈" }`，执行 `npx tsx scripts/run-modeling.ts --input /path/to/input.json --provider gpt`，环境中需提供对应的 API 配置。从 B 重试使用 `--semantic-plan /path/to/saved-plan.md --semantic /path/to/semantic.json --narrative /path/to/understanding.md` 替代 `--input`；`--semantic` 仅用于携带历史结构化草稿，可省略；单独重试编译不重跑设计审阅或映射。脚本在临时目录保留输入、输出、事件及耗时。Pi 第二阶段首轮设计通过时包含依据、设计、审阅和编译四次调用，语义修订受三轮上限约束；最终 JSON 校验失败最多另加一次修复。
 
 浏览器回归：先启动开发服务，再运行 `npm run test:ui`（可追加服务 URL）。首次使用需安装 Playwright Chromium：`npx playwright install chromium`。脚本使用独立浏览器上下文和模拟 SSE，不调用真实 LLM，覆盖跨页停止、产物跳转、草稿恢复、编译重试和窄屏布局。
 
@@ -132,7 +117,12 @@ relations, actions, functions, rules, activities, boundaries and textual evidenc
 `/api/discuss` uses the selected provider through the same interface.
 
 The UI and shared protocol constants default to GLM and the Pi Agent runtime. Users
-can switch provider or runtime for the current session. Previously saved provider
+can switch provider and reasoning settings for the current session; the UI's direct
+runtime button is disabled. Reasoning options come from `/api/models`, based on the
+server's configured model, and reset to the lowest supported setting when switching
+providers or reloading. Each request carries that choice through Pi, review,
+compilation, validation and discussion without mutating the server environment.
+See [model reasoning settings and sources](docs/model-reasoning.md). Previously saved provider
 preferences do not override this default. The server and command-line provider resolver
 also default to GLM. Set `UOM_LLM_PROVIDER=deepseek`, `gpt`, `qwen` or `glm` to override
 the provider default; the server uses Pi when a request selects it or when
@@ -140,15 +130,15 @@ the provider default; the server uses Pi when a request selects it or when
 an explicit request or `--provider` choice takes precedence.
 Credentials are loaded from the project root `.env` and remain server-side.
 API URLs accept either a base URL ending in `/v1` or the full `/chat/completions` endpoint.
-All DeepSeek calls explicitly disable thinking with `thinking: { type: "disabled" }`
-while retaining streaming output and the configured `LLM_MODEL`.
+DeepSeek Flash supports disabled thinking or `low`, `high`, `max`; the UI defaults
+to disabled thinking. Legacy requests without a selection retain the previous defaults.
 `LLM_MAX_OUTPUT_TOKENS` sets its output limit (default: 16384) to allow longer
 candidate models to finish. A response cut off by the upstream limit still fails
 validation; partial JSON is never accepted as a model.
 
-Qwen uses `QWEN_MAX_OUTPUT_TOKENS` (default `16384`) and does not send provider-
-specific reasoning parameters, so the endpoint can remain a standard
-OpenAI-compatible Chat Completions service.
+Qwen uses `QWEN_MAX_OUTPUT_TOKENS` (default `16384`). Qwen 3.6 exposes a thinking
+switch, not invented named effort tiers. The local server uses
+`chat_template_kwargs.enable_thinking`; DashScope uses `enable_thinking`.
 
 GLM defaults to `glm-5.3-flash` at `https://open.bigmodel.cn/api/coding/paas/v4`;
 `GLM_API_KEY` is required in the project root `.env`. Standard API keys can
@@ -156,8 +146,9 @@ override the endpoint with `GLM_API_URL=https://open.bigmodel.cn/api/paas/v4`.
 Coding Plan quota is separate from standard API balance. See the [Coding Plan setup guide](https://docs.bigmodel.cn/cn/coding-plan/quick-start)
 for key creation and supported tools, including Pi Coding Agent.
 `GLM_API_URL` also accepts the full `/chat/completions` endpoint. `GLM_MODEL` can select
-`glm-5.3-flashx`. Both direct calls and all Pi agents use
-`GLM_REASONING_EFFORT=max` (allowed: `low`, `high`, `max`) and
+`glm-5.3-flashx`. Explicit request selections override the environment in both
+direct calls and all Pi agents. Requests without a selection use
+`GLM_REASONING_EFFORT` (default `max`; allowed: `low`, `high`, `max`) and
 `GLM_MAX_OUTPUT_TOKENS=32768` (up to `131072`). `GLM_API_TIMEOUT_MS` controls
 direct requests (default `300000`); `UOM_PI_TIMEOUT_MS` controls each Pi loop.
 GLM-5.3-Flash requires thinking: requests use `thinking.type=enabled` and

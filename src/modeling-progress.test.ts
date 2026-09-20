@@ -7,6 +7,19 @@ import {
 } from './modeling-progress.ts'
 import type { CandidateDraft, SemanticPlan, StageTiming } from './types.ts'
 
+test('design expression checks stay in the design step, with unresolved feedback independent of a compiled candidate', () => {
+  const plan: SemanticPlan = { plan: '设计', complete: true, compiled: true,
+    businessBasis: '依据', businessBasisComplete: true,
+    designReview: { status: 'checking', round: 2, rounds: [] } }
+  const active = modelingProgress({ plan, candidate: null, runningPart: 'design-check' })
+  assert.equal(active.steps.length, 3)
+  assert.equal(active.active?.tab, 'decisions')
+  assert.match(active.active!.detail, /第 2 轮/)
+  const completed = modelingProgress({ plan: { ...plan, designReview: { ...plan.designReview!, status: 'attention', reason: 'limit' } }, candidate })
+  assert.equal(completed.tabs.find(tab => tab.id === 'decisions')?.state, 'attention')
+  assert.equal(completed.tabs.find(tab => tab.id === 'model')?.state, 'done')
+})
+
 const candidate: CandidateDraft = {
   revision: 1,
   documentRevision: 1,
@@ -60,17 +73,17 @@ test('a new run never presents the retained candidate as newly compiled or check
   const progress = modelingProgress({
     plan: { plan: '', complete: false, compiled: false },
     candidate,
-    runningPart: 'semantic',
+    runningPart: 'basis',
   })
-  assert.equal(progress.active?.id, 'facts')
+  assert.equal(progress.active?.id, 'basis')
   assert.equal(progress.oldCandidate, true)
   assert.equal(
     progress.steps.find((item) => item.id === 'compile')?.state,
     'stale',
   )
   assert.equal(
-    progress.steps.find((item) => item.id === 'expression')?.state,
-    'stale',
+    progress.steps.find((item) => item.id === 'expression'),
+    undefined,
   )
   assert.doesNotMatch(
     progress.tabs.find((item) => item.id === 'model')!.detail,
@@ -214,4 +227,15 @@ test('last-run timings do not add historical retries to the latest full run', ()
   assert.deepEqual(latestModelTimings({ model: [old], compile: [latest] }), [
     latest,
   ])
+})
+
+test('text workflow has one step per tab and never treats an optional review as unfinished modeling', () => {
+  const textPlan: SemanticPlan = { plan: '自由设计文本。', businessBasis: '自由业务依据。', businessBasisComplete: true, complete: true, compiled: true }
+  const progress = modelingProgress({ plan: textPlan, candidate: { ...candidate, expressionReview: { ...candidate.expressionReview!, status: 'not-run' } } })
+  assert.deepEqual(progress.steps.map(step => [step.id, step.tab]), [['basis', 'evidence'], ['decisions', 'decisions'], ['compile', 'model']])
+  assert.ok(progress.tabs.every(tab => tab.state === 'done'))
+  assert.doesNotMatch(JSON.stringify(progress), /检查未完成|映射未完成|本轮用例通过/)
+  const partial = modelingProgress({ plan: { ...textPlan, plan: '', businessBasisComplete: false, complete: false, compiled: false }, candidate: null })
+  assert.equal(partial.tabs[0].state, 'waiting')
+  assert.equal(partial.tabs[0].detail, '部分内容已保留')
 })

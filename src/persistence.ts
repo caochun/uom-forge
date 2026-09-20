@@ -215,7 +215,7 @@ function readAssessment(value: unknown): Assessment | null {
 function readPlan(value: unknown): SemanticPlan | null {
   if (!isRecord(value)) return null
   const { semantic: storedSemantic, basis: storedBasis, businessBasis: storedBusinessBasis, businessBasisComplete: storedBasisComplete,
-    designReview: storedReview, designDraft: storedDraft, ...rest } = value
+    designReview: storedReview, designDraft: storedDraft, compilation: storedCompilation, ...rest } = value
   const designReview = interruptDesignReview(readDesignReview(storedReview))
   let semantic: SemanticPlanV2 | undefined
   if (isRecord(storedSemantic)) {
@@ -230,6 +230,13 @@ function readPlan(value: unknown): SemanticPlan | null {
     plan: text(value.plan),
     ...(designReview ? { designReview } : {}),
     ...(typeof storedDraft === 'string' ? { designDraft: storedDraft } : {}),
+    ...(isRecord(storedCompilation) && typeof storedCompilation.text === 'string' && typeof storedCompilation.reasoning === 'string' ? {
+      compilation: {
+        text: storedCompilation.text, reasoning: storedCompilation.reasoning,
+        attempt: Number.isSafeInteger(storedCompilation.attempt) && Number(storedCompilation.attempt) > 0 ? Number(storedCompilation.attempt) : 1,
+        status: storedCompilation.status === 'completed' && value.compiled === true ? 'completed' as const : 'interrupted' as const,
+      },
+    } : {}),
     ...(typeof storedBusinessBasis === 'string' ? { businessBasis: storedBusinessBasis, businessBasisComplete: storedBasisComplete === true } : {}),
     complete: value.complete === true,
     compiled: value.compiled === true,

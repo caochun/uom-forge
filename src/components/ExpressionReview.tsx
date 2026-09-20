@@ -102,7 +102,7 @@ export default function ExpressionReview({
   return (
     <details ref={details} className="expression-review panel-surface">
       <summary>
-        <strong>业务表达检查</strong>
+        <strong>候选模型复核</strong>
         <span>
           {stale || candidate.edited
             ? '以下检查对应先前版本，需要更新'
@@ -116,7 +116,7 @@ export default function ExpressionReview({
       </summary>
       <div className="expression-review-body">
         <p className="muted">
-          检查模型能否表达业务说明中的具体事实。结论仅覆盖本轮用例，不代表已证明业务完整覆盖。
+          这是对已生成候选模型的独立复核记录，可能来自历史流程或手动复核；本轮设计迭代的表达检查在“模型设计”中，生成 JSON 时不会自动再执行此复核。结论仅覆盖本轮用例。
         </p>
         {check ? <p>{check.summary}</p> : <p>当前候选尚未完成有效检查。</p>}
         {review.warnings.map((warning, i) => (

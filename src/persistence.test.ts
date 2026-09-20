@@ -7,6 +7,7 @@ import { reviseUnderstanding, hasUnsavedAnswers } from './understanding.ts'
 import { freshness } from './workspace.ts'
 import { extractUnderstandingSources } from '../shared/understanding-sources.ts'
 import { artifactVersion } from '../shared/workflow.ts'
+import { prepareCompilationRetry } from './modeling-progress.ts'
 
 const empty: Project = {
   version: 4,
@@ -25,6 +26,18 @@ const empty: Project = {
   revisions: initialRevisions,
   messages: [],
 }
+test('partial compilation output survives reload without becoming a candidate, and retry starts a fresh stream', () => {
+  const stored: Project = { ...empty, plan: {
+    plan: '已完成设计', complete: true, compiled: false,
+    compilation: { text: '{"objects":[', reasoning: '转录对象。', attempt: 2, callId: 'previous-call', status: 'streaming' },
+  } }
+  const restored = restoreProject(JSON.parse(JSON.stringify(stored)), empty)
+  assert.equal(restored.candidate, null)
+  assert.equal(restored.plan?.compiled, false)
+  assert.deepEqual(restored.plan?.compilation, { text: '{"objects":[', reasoning: '转录对象。', attempt: 2, status: 'interrupted' })
+  assert.equal(prepareCompilationRetry(restored.plan!).compilation, undefined)
+  assert.equal(prepareCompilationRetry(restored.plan!).plan, '已完成设计')
+})
 test('interrupted design iteration retains complete design, partial revision and reviewer feedback on reload', () => {
   const stored: Project = { ...empty, plan: {
     plan: '完整设计。', complete: true, compiled: false, designDraft: '部分修订',

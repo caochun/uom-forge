@@ -182,9 +182,11 @@ test('semantic turn and compiler have isolated inputs; stream and result preserv
 
 test('compiler preserves relation context without domain-specific rules', () => {
   const prompt = compileModelPrompt('PLAN')
-  assert.match(prompt, /关系语义保真检查/)
+  assert.match(prompt, /只把设计转换/)
   assert.match(prompt, /组成部分、顺序、角色、来源\/去向/)
-  assert.match(prompt, /待审阅边界/)
+  assert.match(prompt, /缺口与未决事项如实保留/)
+  assert.match(prompt, /不重新提炼事实、组织故事、选择检验情形或评估业务表达能力/)
+  assert.match(prompt, /阈值、单位、逻辑组合、优先级、公式和否决条件/)
   assert.doesNotMatch(prompt, /馈线|变电站|双电源/)
 })
 

@@ -41,10 +41,18 @@ export interface WorkspaceDocument extends BusinessDocument {
   size: string
   updated: string
 }
+export interface CompilationOutput {
+  text: string
+  reasoning: string
+  attempt: number
+  callId?: string
+  status: 'streaming' | 'completed' | 'interrupted'
+}
 export interface SemanticPlan {
   plan: string
   designReview?: DesignReview
   designDraft?: string
+  compilation?: CompilationOutput
   businessBasis?: string
   businessBasisComplete?: boolean
   // Preserve the document reading used to derive this run's businessBasis, including source

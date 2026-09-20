@@ -290,6 +290,7 @@ export function prepareCompilationRetry(plan: SemanticPlan): SemanticPlan {
   return {
     ...plan,
     compiled: false,
+    compilation: undefined,
     warnings: [],
     ...(plan.semantic
       ? {

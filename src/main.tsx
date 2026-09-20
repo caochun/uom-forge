@@ -278,7 +278,10 @@ function App() {
     } finally {
       setProject((current) => ({
         ...current,
-        plan: current.plan ? { ...current.plan, designReview: interruptDesignReview(current.plan.designReview) } : null,
+        plan: current.plan ? { ...current.plan, designReview: interruptDesignReview(current.plan.designReview),
+          ...(current.plan.compilation?.status === 'streaming'
+            ? { compilation: { ...current.plan.compilation, status: 'interrupted' as const } } : {}),
+        } : null,
         candidate: current.candidate?.expressionReview
           ? {
               ...current.candidate,
@@ -420,6 +423,12 @@ function App() {
           const record = { ...event.timing, part: event.part }
           return {
             ...current,
+            ...(event.part === 'compile' && event.timing.status === 'running' && current.plan && current.plan.compilation?.callId !== event.timing.callId ? {
+              plan: { ...current.plan, compilation: {
+                text: '', reasoning: '', status: 'streaming' as const, callId: event.timing.callId,
+                attempt: current.plan.compilation?.callId ? current.plan.compilation.attempt + 1 : 1,
+              } },
+            } : {}),
             timings: {
               ...current.timings,
               [stage]: records.some((item) => item.callId === record.callId)
@@ -433,6 +442,9 @@ function App() {
       }
       if (event.type === 'phase') {
         addModelActivity(event.text)
+        if (event.part === 'compile') setProject(current => current.plan && !current.plan.compilation ? ({
+          ...current, plan: { ...current.plan, compilation: { text: '', reasoning: '', attempt: 1, status: 'streaming' } },
+        }) : current)
         setJob((current) =>
           current
             ? {
@@ -444,6 +456,13 @@ function App() {
         )
       }
       if (event.type === 'delta') {
+        if (event.part === 'compile') setProject(current => current.plan ? ({
+          ...current, plan: { ...current.plan, compilation: {
+            ...(current.plan.compilation || { text: '', reasoning: '', attempt: 1 }),
+            status: 'streaming',
+            [event.reasoning ? 'reasoning' : 'text']: (current.plan.compilation?.[event.reasoning ? 'reasoning' : 'text'] || '') + event.text,
+          } },
+        }) : current)
         if (
           event.part &&
           event.part !== part &&
@@ -571,7 +590,7 @@ function App() {
             expressionReview: event.expressionReview,
           },
           plan: current.plan
-            ? { ...current.plan, compiled: true }
+            ? { ...current.plan, compiled: true, ...(current.plan.compilation ? { compilation: { ...current.plan.compilation, status: 'completed' as const } } : {}) }
             : current.plan,
           revisions: {
             ...current.revisions,
@@ -688,6 +707,7 @@ function App() {
             plan: {
               plan: result.semanticPlan,
               designReview: result.designReview,
+              compilation: current.plan?.compilation,
               designDraft: result.designReview?.reason === 'interrupted' ? current.plan?.designDraft : undefined,
               basis: current.plan?.basis,
               businessBasis: result.businessBasis ?? current.plan?.businessBasis,
@@ -720,8 +740,8 @@ function App() {
           (result.expressionReview.status === 'not-run'
             ? '候选模型已生成，结构和引用检查通过。'
             : result.expressionReview.status === 'passed'
-            ? '候选模型已生成，本轮业务表达检查用例均可表达。'
-            : '候选模型已保留，请查看业务表达检查中的剩余事项。') +
+            ? '候选模型已生成，本轮候选模型复核用例均可表达。'
+            : '候选模型已保留，请查看候选模型复核中的剩余事项。') +
           (result.designReview?.status === 'attention' ? '设计仍有待审阅意见，请查看“模型设计”。' : '') +
           '可点击“检验模型”查看自述和业务过程支撑。',
       })

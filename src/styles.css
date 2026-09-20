@@ -634,6 +634,36 @@ h4 {
   padding: 0 14px 14px;
   line-height: 1.8;
 }
+.compilation-stream {
+  min-width: 0;
+}
+.compilation-stream > summary {
+  cursor: pointer;
+  padding: 16px 20px;
+}
+.compilation-stream > summary span {
+  display: inline-block;
+  margin-left: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.compilation-stream > .reading-note {
+  margin: 0;
+  padding: 8px 20px;
+}
+.compilation-json {
+  max-height: 360px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 16px 20px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f4f7fb;
+  font-size: 12px;
+  line-height: 1.7;
+}
 .semantic-derivation .muted {
   display: block;
 }

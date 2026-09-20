@@ -238,6 +238,13 @@ const emit = (page: Page, event: AnalysisEvent) =>
 const tabs = (page: Page) => page.getByRole('group', { name: '建模工作区内容' })
 const nav = (page: Page) =>
   page.getByRole('navigation', { name: '工作区', exact: true })
+const compilationTiming = (callId: string): AnalysisEvent => ({
+  type: 'timing', part: 'compile', timing: {
+    callId, provider: 'glm', model: 'glm-5.3-flash', reasoningEffort: 'low',
+    startedAt: new Date().toISOString(), promptCharacters: 10, outputCharacters: 0,
+    elapsedMs: 0, status: 'running',
+  },
+})
 try {
   const selection = await open(project)
   const effort = selection.page.getByRole('combobox', { name: '模型推理强度' })
@@ -434,6 +441,10 @@ try {
   await expect(
     tabs(page).getByRole('button', { name: /模型视图/ }),
   ).toHaveAttribute('data-state', 'active')
+  await tabs(page).getByRole('button', { name: /模型视图/ }).click()
+  await expect(page.locator('.compilation-stream')).toBeVisible()
+  await expect(page.locator('.expression-review')).toHaveCount(0)
+  await expect(page.locator('.model-summary')).toContainText('订单模型')
   await emit(page, {
     type: 'model-checkpoint',
     model,
@@ -561,6 +572,29 @@ try {
   await emit(simple.page, { type: 'design-review', part: 'semantic', semanticPlan: finalDesign, review: designReview })
   await emit(simple.page, { type: 'model-plan', part: 'semantic', semanticPlan: finalDesign, clarifications: [], warnings: [] })
   await emit(simple.page, { type: 'phase', part: 'compile', text: '正在生成模型。' })
+  await simple.page.getByRole('button', { name: '查看当前产物', exact: true }).click()
+  await emit(simple.page, compilationTiming('compile-1'))
+  await emit(simple.page, { type: 'delta', part: 'compile', reasoning: true, text: '正在转录既有定义。' })
+  await expect(simple.page.getByRole('region', { name: '模型思考过程' })).toContainText('正在转录既有定义。')
+  await expect(simple.page.locator('.model-summary')).toHaveCount(0)
+  const unfinishedJson = '{"name":"订单模型","objects":['
+  await emit(simple.page, { type: 'delta', part: 'compile', text: unfinishedJson })
+  await expect(simple.page.getByRole('region', { name: '模型 JSON 实时输出' })).toHaveText(unfinishedJson)
+  await expect(simple.page.locator('.reading-reasoning')).not.toHaveAttribute('open', '')
+  await expect(simple.page.getByRole('region', { name: '模型 JSON 实时输出' })).not.toContainText('正在转录')
+  await simple.page.screenshot({ path: path.join(artifacts, 'compilation-stream.png'), fullPage: true })
+  await simple.page.setViewportSize({ width: 390, height: 844 })
+  await simple.page.getByRole('button', { name: '收起建模助手', exact: true }).click()
+  await simple.page.screenshot({ path: path.join(artifacts, 'compilation-stream-mobile.png'), fullPage: true })
+  assert.ok(await simple.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'streaming JSON must wrap on mobile')
+  await simple.page.setViewportSize({ width: 1440, height: 1000 })
+  await emit(simple.page, { type: 'phase', part: 'compile', text: '模型 JSON 未通过程序校验，正在进行一次修复。' })
+  await emit(simple.page, compilationTiming('compile-2'))
+  await expect(simple.page.locator('.compilation-stream')).toContainText('第 2 次输出')
+  await expect(simple.page.getByRole('region', { name: '模型 JSON 实时输出' })).toHaveCount(0)
+  await expect(simple.page.locator('.compilation-stream')).not.toContainText('正在转录既有定义。')
+  await emit(simple.page, { type: 'delta', part: 'compile', text: JSON.stringify(model) })
+  await expect(simple.page.locator('.model-summary')).toHaveCount(0)
   const unreviewed: ExpressionReview = { status: 'not-run', selectedSnapshot: 0, snapshots: [{ model }], changes: [], warnings: [] }
   await emit(simple.page, { type: 'model-checkpoint', model, expressionReview: unreviewed })
   await emit(simple.page, { type: 'result', result: { ...result, semantic: undefined, businessBasis: textBasis, semanticPlan: finalDesign, designReview, expressionReview: unreviewed } })
@@ -569,6 +603,8 @@ try {
   await expect(simple.page.locator('.todo-bar')).toHaveCount(0)
   await tabs(simple.page).getByRole('button', { name: /模型视图/ }).click()
   await expect(simple.page.locator('.model-summary')).toContainText('订单模型')
+  await expect(simple.page.locator('.compilation-stream')).not.toHaveAttribute('open', '')
+  await expect(simple.page.locator('.compilation-stream > summary')).toContainText('结构和引用检查通过')
   await expect(simple.page.locator('.expression-review')).toHaveCount(0)
   await simple.page.getByRole('button', { name: '展开运行记录', exact: true }).click()
   await expect(simple.page.locator('.modeling-workflow > li')).toHaveCount(3)
@@ -591,10 +627,33 @@ try {
   await expect(simple.page.locator('.business-basis')).toContainText('故事：提交后进入审核。')
   await expect(simple.page.locator('.todo-bar')).toHaveCount(0)
   await simple.page.setViewportSize({ width: 390, height: 844 })
-  await simple.page.getByRole('button', { name: '收起建模助手', exact: true }).click()
+  if (await simple.page.getByRole('button', { name: '收起建模助手', exact: true }).count())
+    await simple.page.getByRole('button', { name: '收起建模助手', exact: true }).click()
   await simple.page.screenshot({ path: path.join(artifacts, 'simplified-mobile.png'), fullPage: true })
   assert.ok(await simple.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
   await simple.context.close()
+
+  const interruptedCompile = await open({ ...simpleDraft, plan: {
+    plan: finalDesign, businessBasis: textBasis, businessBasisComplete: true, complete: true, compiled: false,
+  } })
+  await interruptedCompile.page.locator('.workspace-heading').getByRole('button', { name: '重新整理模型', exact: true }).click()
+  await emit(interruptedCompile.page, { type: 'phase', part: 'compile', text: '正在生成模型。' })
+  await emit(interruptedCompile.page, { type: 'delta', part: 'compile', text: unfinishedJson })
+  await tabs(interruptedCompile.page).getByRole('button', { name: /模型视图/ }).click()
+  await interruptedCompile.page.getByRole('button', { name: '停止', exact: true }).click()
+  await expect(interruptedCompile.page.locator('.compilation-stream')).toContainText('已保留部分输出')
+  await interruptedCompile.page.getByRole('button', { name: '保存草稿', exact: true }).click()
+  await interruptedCompile.page.reload()
+  await nav(interruptedCompile.page).getByRole('button', { name: '03 建模' }).click()
+  await tabs(interruptedCompile.page).getByRole('button', { name: /模型视图/ }).click()
+  await expect(interruptedCompile.page.getByRole('region', { name: '模型 JSON 实时输出' })).toHaveText(unfinishedJson)
+  await expect(interruptedCompile.page.locator('.model-summary')).toHaveCount(0)
+  await interruptedCompile.page.locator('.workspace-heading').getByRole('button', { name: '重新整理模型', exact: true }).click()
+  await emit(interruptedCompile.page, { type: 'phase', part: 'compile', text: '正在生成模型。' })
+  await expect(interruptedCompile.page.locator('.compilation-stream')).toContainText('第 1 次输出')
+  await expect(interruptedCompile.page.getByRole('region', { name: '模型 JSON 实时输出' })).toHaveCount(0)
+  await interruptedCompile.page.getByRole('button', { name: '停止', exact: true }).click()
+  await interruptedCompile.context.close()
 
   // A question derived from the basis is not an original-document quote.
   // Appending that question must not change the reading snapshot used by a

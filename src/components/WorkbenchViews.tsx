@@ -17,6 +17,7 @@ import { modelingContent } from '../../shared/clarifications.ts'
 import { designReviewLabel } from '../../shared/design-review.ts'
 import QQDocEditor from 'qq-doc-clone'
 import ModelGraph from './ModelGraph.tsx'
+import CompilationStream from './CompilationStream.tsx'
 import { documentToHtml } from '../document.ts'
 import { relatedElements } from '../workspace.ts'
 import { type ModelingProgress } from '../modeling-progress.ts'
@@ -316,6 +317,7 @@ export function CandidateView({
           ))}
         </div>
       </div>
+      {mode === 'model' && plan?.compilation && <CompilationStream output={plan.compilation} active={!!running && progress.active?.id === 'compile' && plan.compilation.status === 'streaming'} />}
       {mode === 'evidence' ? !plan?.semantic ? (
         <article className="panel-surface reading-narrative business-basis">
           <div className="panel-toolbar"><div>
@@ -409,7 +411,7 @@ export function CandidateView({
             !!candidate?.expressionReview?.changes.length) &&
             plan?.compiled && (
               <Notice>
-                初始设计，模型已有调整。最新定义以模型视图为准，自动修正原因见业务表达检查。
+                初始设计，模型已有调整。最新定义以模型视图为准，自动修正原因见候选模型复核。
               </Notice>
             )}
         </article>
@@ -426,7 +428,7 @@ export function CandidateView({
                 : '当前显示上轮保留的模型，本轮尚未生成新候选。'}
             </Notice>
           )}
-          {candidate && (
+          {candidate && !(running && progress.oldCandidate) && (
             <ExpressionReview candidate={candidate} onSelect={select} focusRequest={expressionFocus} stale={progress.reviewStale} />
           )}
           <div className="model-summary">

@@ -1,5 +1,5 @@
 import type { Agent, StreamFn } from '@earendil-works/pi-agent-core'
-import type { Model } from '@earendil-works/pi-ai'
+import { createAssistantMessageEventStream, type Model } from '@earendil-works/pi-ai'
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions'
 import type { ProviderId } from '../../shared/analysis.ts'
 import { requireModelProviderConfig } from './model-config.ts'
@@ -58,22 +58,66 @@ export function createPiStream(
   const config = requireModelProviderConfig(provider, env)
   const selected = selectedReasoning(provider, reasoningEffort, env)
   const glm = provider === 'glm' ? glmGenerationOptions(selected.effort ? { ...env, GLM_REASONING_EFFORT: selected.effort } : env) : undefined
-  return (model, context, options) => streamSimple(model as Model<'openai-completions'>, context, {
-    ...options,
-    // Exact vendor values are applied below after the SDK's generic level map.
-    ...(selected.effort ? { reasoning: selected.effort === 'none' ? undefined : 'low' as const } : {}),
-    // GLM only supports auto. Handoff retries still use the agent's follow-up
-    // instruction; never send required or disable thinking to force a tool.
-    ...(glm ? { reasoning: glm.reasoningEffort, toolChoice: 'auto' } : {}),
-    samplingParams: {
-      ...options?.samplingParams,
-      ...(!glm && requireTool() ? { tool_choice: 'required' } : {}),
-      ...(glm ? glm.parameters : provider === 'deepseek' && requireTool() && !selected.effort ? { thinking: { type: 'disabled' } } : {}),
-      ...selected.parameters,
-    },
-    apiKey: config.apiKey,
-    maxTokens: glm?.maxTokens || 24000,
-  })
+  return (model, context, options) => {
+    const streamOptions = {
+      ...options,
+      // Exact vendor values are applied below after the SDK's generic level map.
+      ...(selected.effort ? { reasoning: selected.effort === 'none' ? undefined : 'low' as const } : {}),
+      // GLM only supports auto. Handoff retries still use the agent's follow-up
+      // instruction; never send required or disable thinking to force a tool.
+      ...(glm ? { reasoning: glm.reasoningEffort, toolChoice: 'auto' as const } : {}),
+      samplingParams: {
+        ...options?.samplingParams,
+        ...(!glm && requireTool() ? { tool_choice: 'required' } : {}),
+        ...(glm ? glm.parameters : provider === 'deepseek' && requireTool() && !selected.effort ? { thinking: { type: 'disabled' } } : {}),
+        ...selected.parameters,
+      },
+      apiKey: config.apiKey,
+      maxTokens: glm?.maxTokens || 24000,
+    }
+    const create = () => streamSimple(model as Model<'openai-completions'>, context, streamOptions)
+    // A transient upstream connection close is reported by undici as the bare
+    // message "terminated". Retry only when it happens before any assistant
+    // content, so a retry cannot duplicate already streamed text or tool calls.
+    const result = createAssistantMessageEventStream()
+    void (async () => {
+      let retries = 0
+      for (;;) {
+        const upstream = create()
+        let start: Parameters<typeof result.push>[0] | undefined
+        let emittedContent = false
+        for await (const event of upstream) {
+          if (event.type === 'start') {
+            start = event
+            continue
+          }
+          const isContent = event.type === 'text_start' || event.type === 'text_delta' || event.type === 'text_end' ||
+            event.type === 'thinking_start' || event.type === 'thinking_delta' || event.type === 'thinking_end' ||
+            event.type === 'toolcall_start' || event.type === 'toolcall_delta' || event.type === 'toolcall_end'
+          if (isContent) emittedContent = true
+          if (event.type === 'error' && !emittedContent && retries < 1 && !options?.signal?.aborted && /\bterminated\b/i.test(event.error.errorMessage || '')) {
+            retries++
+            start = undefined
+            break
+          }
+          if (start) {
+            result.push(start)
+            start = undefined
+          }
+          result.push(event)
+          if (event.type === 'done' || event.type === 'error') {
+            result.end()
+            return
+          }
+        }
+        if (start) result.push(start)
+        if (retries > 0 && !emittedContent) continue
+        result.end()
+        return
+      }
+    })()
+    return result
+  }
 }
 
 export function throwIfPiFailed(

@@ -127,6 +127,28 @@ test('GLM Pi loop streams tool arguments and replays original reasoning and tool
   assert.equal(tool.content, '检查通过；编号 12。')
 })
 
+test('GLM Pi retries a terminated connection before it emits assistant content', async () => {
+  const env = { GLM_API_KEY: 'glm-test-key', GLM_API_URL: 'https://glm.invalid/v4', GLM_REASONING_EFFORT: 'low' }
+  let calls = 0
+  const stream = createPiStream('glm', () => false, env)
+  const output = await stream(createPiModel('glm', env), {
+    systemPrompt: '输出文本。',
+    messages: [{ role: 'user', content: '测试', timestamp: Date.now() }],
+    tools: [],
+  }, {
+    fetch: async () => {
+      calls++
+      if (calls === 1)
+        return new Response(new ReadableStream<Uint8Array>({ start(controller) { controller.error(new Error('terminated')) } }))
+      return new Response(frame({ content: '重试成功' }, 'stop') + done, { headers: { 'content-type': 'text/event-stream' } })
+    },
+  })
+  const message = await output.result()
+  assert.equal(calls, 2)
+  assert.equal(message.stopReason, 'stop')
+  assert.equal((message.content[0] as { type: string; text?: string }).text, '重试成功')
+})
+
 test('GLM understanding reports upstream quota errors instead of retrying tool handoff or hiding the cause', async (t) => {
   const oldKey = process.env.GLM_API_KEY
   process.env.GLM_API_KEY = 'glm-error-test-key'

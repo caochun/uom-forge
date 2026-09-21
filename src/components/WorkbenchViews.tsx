@@ -372,6 +372,9 @@ export function CandidateView({
               {progress.steps.find((step) => step.id === 'decisions')?.detail}
             </span>
           </div>
+          {plan?.designReasoning && <ReasoningStream text={plan.designReasoning}
+            active={!!running && progress.active?.id === 'decisions' && plan.designReview?.status === 'drafting' && !plan.designDraft}
+            complete={plan.designReview?.status !== 'drafting'} />}
           {plan?.plan || plan?.designDraft ? (
             <Markdown>{modelingContent(plan.designReview?.status === 'drafting' && plan.designDraft ? plan.designDraft : plan.plan)}</Markdown>
           ) : (
@@ -396,6 +399,11 @@ export function CandidateView({
             {plan.designReview.feedbackDraft && <section>
               <strong>{plan.designReview.status === 'checking' ? '当前检查意见' : '未完成的检查意见'}</strong>
               <Markdown>{plan.designReview.feedbackDraft}</Markdown>
+            </section>}
+            {plan.designCheckReasoning && <section>
+              <ReasoningStream text={plan.designCheckReasoning}
+                active={!!running && progress.active?.id === 'decisions' && plan.designReview.status === 'checking' && !plan.designReview.feedbackDraft}
+                complete={plan.designReview.status !== 'checking'} />
             </section>}
           </details>}
           {plan?.designDraft && plan.designReview?.status === 'attention' && <details className="reading-note">

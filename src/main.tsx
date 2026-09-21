@@ -486,6 +486,16 @@ function App() {
             ...current, plan: { ...current.plan, [field]: (current.plan[field] || '') + event.text },
           }) : current)
         }
+        if (stage === 'model' && event.reasoning && event.part === 'semantic')
+          setProject(current => current.plan ? ({
+            ...current,
+            plan: { ...current.plan, designReasoning: (current.plan.designReasoning || '') + event.text },
+          }) : current)
+        if (stage === 'model' && event.reasoning && event.part === 'design-check')
+          setProject(current => current.plan ? ({
+            ...current,
+            plan: { ...current.plan, designCheckReasoning: (current.plan.designCheckReasoning || '') + event.text },
+          }) : current)
         if (!event.reasoning) {
           if (stage === 'narrate')
             setNarratingText((current) => current + (event.text || ''))
@@ -513,7 +523,9 @@ function App() {
           ...(event.semanticPlan !== undefined
             ? { plan: event.semanticPlan, complete: true, compiled: false, designDraft: undefined }
             : event.review.status === 'drafting' && event.review.round !== current.plan?.designReview?.round
-              ? { designDraft: '' } : {}),
+              ? { designDraft: '', designReasoning: '', designCheckReasoning: '' }
+              : event.review.status === 'checking'
+                ? { designCheckReasoning: '' } : {}),
         }, revisions: { ...current.revisions, planBasis: basis } }))
       }
       if (event.type === 'business-basis') {
@@ -533,6 +545,8 @@ function App() {
                 plan: event.semanticPlan,
                 designReview: current.plan?.designReview,
                 designDraft: current.plan?.designReview?.reason === 'interrupted' ? current.plan.designDraft : undefined,
+                designReasoning: current.plan?.designReasoning,
+                designCheckReasoning: current.plan?.designCheckReasoning,
                 basis: current.plan?.basis,
                 businessBasis: current.plan?.businessBasis,
                 businessBasisReasoning: current.plan?.businessBasisReasoning,
@@ -712,6 +726,8 @@ function App() {
               designReview: result.designReview,
               compilation: current.plan?.compilation,
               designDraft: result.designReview?.reason === 'interrupted' ? current.plan?.designDraft : undefined,
+              designReasoning: current.plan?.designReasoning,
+              designCheckReasoning: current.plan?.designCheckReasoning,
               basis: current.plan?.basis,
               businessBasis: result.businessBasis ?? current.plan?.businessBasis,
               businessBasisReasoning: current.plan?.businessBasisReasoning,

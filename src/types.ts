@@ -52,6 +52,9 @@ export interface SemanticPlan {
   plan: string
   designReview?: DesignReview
   designDraft?: string
+  // Display-only streams from the current design iteration and its expression check.
+  designReasoning?: string
+  designCheckReasoning?: string
   compilation?: CompilationOutput
   businessBasis?: string
   // Display-only stream, kept separately from the basis sent to later stages.

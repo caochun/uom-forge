@@ -216,7 +216,8 @@ function readPlan(value: unknown): SemanticPlan | null {
   if (!isRecord(value)) return null
   const { semantic: storedSemantic, basis: storedBasis, businessBasis: storedBusinessBasis, businessBasisComplete: storedBasisComplete,
     businessBasisReasoning: storedBasisReasoning,
-    designReview: storedReview, designDraft: storedDraft, compilation: storedCompilation, ...rest } = value
+    designReview: storedReview, designDraft: storedDraft, designReasoning: storedDesignReasoning,
+    designCheckReasoning: storedDesignCheckReasoning, compilation: storedCompilation, ...rest } = value
   const designReview = interruptDesignReview(readDesignReview(storedReview))
   let semantic: SemanticPlanV2 | undefined
   if (isRecord(storedSemantic)) {
@@ -231,6 +232,8 @@ function readPlan(value: unknown): SemanticPlan | null {
     plan: text(value.plan),
     ...(designReview ? { designReview } : {}),
     ...(typeof storedDraft === 'string' ? { designDraft: storedDraft } : {}),
+    ...(typeof storedDesignReasoning === 'string' ? { designReasoning: storedDesignReasoning } : {}),
+    ...(typeof storedDesignCheckReasoning === 'string' ? { designCheckReasoning: storedDesignCheckReasoning } : {}),
     ...(isRecord(storedCompilation) && typeof storedCompilation.text === 'string' && typeof storedCompilation.reasoning === 'string' ? {
       compilation: {
         text: storedCompilation.text, reasoning: storedCompilation.reasoning,

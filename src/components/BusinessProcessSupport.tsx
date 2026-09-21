@@ -18,6 +18,7 @@ import { EDITABLE_COLLECTIONS } from '../types.ts'
 import type { OnDiscuss } from '../types.ts'
 import Markdown from './Markdown.tsx'
 import ModelElementPreview, { ELEMENT_LABELS } from './ModelElementPreview.tsx'
+import StructuredStream from './StructuredStream.tsx'
 
 const STATUS = {
   supported: { label: '可支撑', icon: CheckCircle2 },
@@ -56,6 +57,7 @@ function feedbackFor(process: string, row: RequirementAssessment) {
 export default function BusinessProcessSupport({
   assessment,
   running,
+  stream,
   model,
   onDiscuss,
   onAddFeedback,
@@ -64,6 +66,7 @@ export default function BusinessProcessSupport({
 }: {
   assessment: Assessment | null
   running: boolean
+  stream?: { text: string; reasoning: string }
   model?: CandidateModel
   onDiscuss: OnDiscuss
   onAddFeedback: (text: string) => void
@@ -107,11 +110,20 @@ export default function BusinessProcessSupport({
   }
   if (!assessment)
     return (
-      <div className="empty-state panel-surface">
-        {running
-          ? '正在逐项检查业务要求与模型表达…'
-          : '还没有业务过程支撑评估。生成候选模型后，可以开始评估。'}
-      </div>
+      <>
+        {stream && <StructuredStream
+          title="业务过程支撑评估"
+          text={stream.text}
+          reasoning={stream.reasoning}
+          active={running}
+          complete={!running && !!stream.text}
+        />}
+        <div className="empty-state panel-surface">
+          {running
+            ? '正在逐项检查业务要求与模型表达…'
+            : '还没有业务过程支撑评估。生成候选模型后，可以开始评估。'}
+        </div>
+      </>
     )
   return (
     <section
@@ -159,6 +171,13 @@ export default function BusinessProcessSupport({
           )}
         </div>
       </article>
+      {stream && <StructuredStream
+        title="业务过程支撑评估"
+        text={stream.text}
+        reasoning={stream.reasoning}
+        active={running}
+        complete={!running && !!stream.text}
+      />}
       {rows.some((row) => !row.requirements.length) && (
         <p className="notice" role="status">
           这份评估含有旧版结果，尚未记录逐项支撑依据。请点击“仅评估业务过程支撑”生成新的对照明细。

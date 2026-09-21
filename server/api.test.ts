@@ -172,11 +172,33 @@ test('discussion uses GPT and all API routes reject disabled ACP before inferenc
     })
     assert.equal(response.status, 200)
     assert.deepEqual(await response.json(), { text: '讨论结果' })
-    for (const route of ['/api/analyze', '/api/analyze/stream', '/api/discuss']) {
+    for (const route of ['/api/analyze', '/api/analyze/stream', '/api/discuss', '/api/discuss/stream']) {
       const disabled = await post(url + route, { provider: 'codex' })
       assert.match(await disabled.text(), /ACP 已停用/)
     }
     assert.equal(calls, 1)
+  } finally {
+    await close(server)
+  }
+})
+
+test('discussion stream forwards provider deltas and returns the validated answer', async () => {
+  const { server, url } = await serve(async (_prompt, options) => {
+    options.onEvent?.({ type: 'delta', text: '正在分析', reasoning: true })
+    options.onEvent?.({ type: 'delta', text: '结论。' })
+    return '结论。'
+  })
+  try {
+    const response = await post(url + '/api/discuss/stream', {
+      provider: 'gpt',
+      document: { name: 'doc', blocks: [{ id: '1', text: '业务说明。' }] },
+      messages: [{ role: 'user', content: '解释业务边界' }],
+    })
+    assert.equal(response.status, 200)
+    const output = await response.text()
+    assert.match(output, /"reasoning":true/)
+    assert.match(output, /"type":"result"/)
+    assert.match(output, /"text":"结论。"/)
   } finally {
     await close(server)
   }
@@ -193,13 +215,13 @@ test('model options are public configuration, and invalid efforts fail before in
     for (const value of Object.values(profiles))
       assert.deepEqual(Object.keys(value as object).sort(), ['defaultEffort', 'description', 'efforts', 'model'])
     assert.equal((await post(url + '/api/models', {})).status, 405)
-    for (const route of ['/api/analyze', '/api/analyze/stream', '/api/discuss']) {
+    for (const route of ['/api/analyze', '/api/analyze/stream', '/api/discuss', '/api/discuss/stream']) {
       const response = await post(url + route, {
         stage: 'understand', provider: 'glm', reasoningEffort: 'none',
         document: { name: 'doc', blocks: [{ id: '1', text: '业务说明。' }] },
         messages: [{ role: 'user', content: '解释' }],
       })
-      if (route !== '/api/analyze/stream') assert.equal(response.status, 400)
+      if (!['/api/analyze/stream', '/api/discuss/stream'].includes(route)) assert.equal(response.status, 400)
       assert.match(await response.text(), /不支持所选思考强度/)
     }
     assert.equal(calls, 0)

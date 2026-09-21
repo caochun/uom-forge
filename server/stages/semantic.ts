@@ -444,9 +444,10 @@ function semanticOptions(options: StageOptions): StageOptions {
   return {
     ...options,
     onEvent: (event) => {
-      // JSON handoff is persisted as a typed event; raw extraction fragments
-      // are intentionally kept out of the normal modeling transcript.
-      if (event.type !== 'delta') options.onEvent?.(event)
+      // Keep raw JSON fragments out of the normal transcript, but preserve
+      // provider thinking deltas so the evidence page can show how the
+      // current fact/story/mapping handoff is progressing.
+      if (event.type !== 'delta' || event.reasoning) options.onEvent?.(event)
     },
   }
 }

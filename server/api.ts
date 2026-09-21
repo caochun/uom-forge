@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { AnalysisEvent } from '../shared/analysis.ts'
+import type { AnalysisEvent, DiscussionEvent } from '../shared/analysis.ts'
 import { PROVIDERS } from '../shared/analysis.ts'
 import type { RunTurn } from './providers/types.ts'
 import { runProviderTurn, resolveProvider } from './providers/index.ts'
@@ -41,7 +41,7 @@ export function createApiMiddleware(runTurn: RunTurn = runProviderTurn) {
       return
     }
     if (
-      !['/api/analyze', '/api/analyze/stream', '/api/discuss'].includes(
+      !['/api/analyze', '/api/analyze/stream', '/api/discuss', '/api/discuss/stream'].includes(
         pathname,
       )
     ) {
@@ -63,12 +63,18 @@ export function createApiMiddleware(runTurn: RunTurn = runProviderTurn) {
     response.on('close', disconnected)
     request.on('aborted', disconnected)
     const streaming = pathname === '/api/analyze/stream'
+    const discussionStreaming = pathname === '/api/discuss/stream'
+    const sse = streaming || discussionStreaming
     let invoked = false
     const emit = (event: AnalysisEvent) => {
       if (!controller.signal.aborted && !response.writableEnded)
         response.write(`data: ${JSON.stringify(event)}\n\n`)
     }
-    if (streaming) {
+    const emitDiscussion = (event: DiscussionEvent) => {
+      if (!controller.signal.aborted && !response.writableEnded)
+        response.write(`data: ${JSON.stringify(event)}\n\n`)
+    }
+    if (sse) {
       response.setHeader('content-type', 'text/event-stream; charset=utf-8')
       response.setHeader('cache-control', 'no-cache, no-transform')
       response.setHeader('connection', 'keep-alive')
@@ -80,7 +86,7 @@ export function createApiMiddleware(runTurn: RunTurn = runProviderTurn) {
       const provider = resolveProvider(
         isRecord(body) ? body.provider : undefined,
       )
-      if (pathname === '/api/discuss') {
+      if (pathname === '/api/discuss' || discussionStreaming) {
         const input = parseDiscussionRequest(body, provider)
         invoked = true
         const text = await discuss(
@@ -88,9 +94,22 @@ export function createApiMiddleware(runTurn: RunTurn = runProviderTurn) {
           input.model,
           input.messages,
           runTurn,
-          { provider, reasoningEffort: input.reasoningEffort, signal: controller.signal },
+          {
+            provider,
+            reasoningEffort: input.reasoningEffort,
+            signal: controller.signal,
+            onEvent: discussionStreaming ? event => {
+              if (event.type === 'delta')
+                emitDiscussion({ type: 'delta', text: event.text, ...(event.reasoning ? { reasoning: true } : {}) })
+            } : undefined,
+          },
         )
-        if (!controller.signal.aborted) response.end(JSON.stringify({ text }))
+        if (!controller.signal.aborted) {
+          if (discussionStreaming) {
+            emitDiscussion({ type: 'result', text })
+            response.end()
+          } else response.end(JSON.stringify({ text }))
+        }
       } else {
         const input = parseAnalysisRequest(
           body,
@@ -118,6 +137,9 @@ export function createApiMiddleware(runTurn: RunTurn = runProviderTurn) {
       if (!controller.signal.aborted) {
         if (streaming) {
           emit({ type: 'error', error: errorMessage(error) })
+          response.end()
+        } else if (discussionStreaming) {
+          emitDiscussion({ type: 'error', error: errorMessage(error) })
           response.end()
         } else {
           response.statusCode = invoked ? 502 : 400

@@ -19,6 +19,7 @@ import QQDocEditor from 'qq-doc-clone'
 import ModelGraph from './ModelGraph.tsx'
 import CompilationStream from './CompilationStream.tsx'
 import ReasoningStream from './ReasoningStream.tsx'
+import StructuredStream from './StructuredStream.tsx'
 import { documentToHtml } from '../document.ts'
 import { relatedElements } from '../workspace.ts'
 import { type ModelingProgress } from '../modeling-progress.ts'
@@ -241,6 +242,7 @@ interface CandidateViewProps {
   evidenceMode: EvidenceMode
   onEvidenceMode: (mode: EvidenceMode) => void
   expressionFocus: number
+  expressionStream?: { text: string; reasoning: string; part: string }
 }
 
 export function CandidateView({
@@ -261,6 +263,7 @@ export function CandidateView({
   evidenceMode,
   onEvidenceMode,
   expressionFocus,
+  expressionStream,
 }: CandidateViewProps) {
   const [collection, setCollection] = useState<CollectionTab>('objects')
   const [adding, setAdding] = useState(false)
@@ -325,6 +328,9 @@ export function CandidateView({
             <h2>业务依据</h2>
             <p className="panel-subtitle">提炼事实、组织故事，明确模型需要表达什么；设计与表达检查共同使用本份依据。</p>
           </div><span className="muted">{progress.steps.find(step => step.id === 'basis')?.detail}</span></div>
+          {plan?.semanticReasoning && <ReasoningStream text={plan.semanticReasoning}
+            active={!!running && !!plan.semanticReasoningPart}
+            complete={!running || !plan.semanticReasoningPart} />}
           {plan?.businessBasisReasoning && <ReasoningStream text={plan.businessBasisReasoning}
             active={!!running && progress.active?.id === 'basis' && !plan.businessBasis && !plan.businessBasisComplete}
             complete={!!plan.businessBasisComplete || !!plan.businessBasis} />}
@@ -339,6 +345,11 @@ export function CandidateView({
         </article>
       ) : (
         <>
+        {plan.semanticReasoning && <ReasoningStream
+          text={plan.semanticReasoning}
+          active={!!running && !!plan.semanticReasoningPart}
+          complete={!running || !plan.semanticReasoningPart}
+        />}
         {!!plan?.semantic?.scenarios?.length && <details className="panel-surface narrative-body">
           <summary>代表性业务情形 · {plan.semantic.scenarios.length} 项</summary>
           <p className="muted">候选生成前形成的检验材料，用于建模与表达检查；情形中的假设实例不是新增业务事实。</p>
@@ -441,7 +452,19 @@ export function CandidateView({
             </Notice>
           )}
           {candidate && !(running && progress.oldCandidate) && (
+            <>
+            {expressionStream && <StructuredStream
+              title={expressionStream.part === 'expression' ? '业务表达检查'
+                : expressionStream.part === 'repair' ? '模型定点修正'
+                  : expressionStream.part === 'recheck' ? '业务表达复查'
+                    : '候选模型复核输出'}
+              text={expressionStream.text}
+              reasoning={expressionStream.reasoning}
+              active={!!running && ['expression', 'repair', 'recheck'].includes(expressionStream.part)}
+              complete={!running}
+            />}
             <ExpressionReview candidate={candidate} onSelect={select} focusRequest={expressionFocus} stale={progress.reviewStale} />
+            </>
           )}
           <div className="model-summary">
             <h2>{model.name}</h2>
@@ -814,6 +837,8 @@ export function ReviewView({
   onDiscuss,
   onCompare,
   comparison,
+  narrationReasoning = '',
+  assessmentStream,
 }: {
   mode: ReviewViewMode
   onMode: (mode: ReviewViewMode) => void
@@ -827,6 +852,8 @@ export function ReviewView({
   onDiscuss: OnDiscuss
   onCompare: () => void
   comparison?: string
+  narrationReasoning?: string
+  assessmentStream?: { text: string; reasoning: string }
 }) {
   return (
     <section className="review-view">
@@ -863,6 +890,11 @@ export function ReviewView({
             <p className="reading-note">
               仅基于候选模型复述，用来检查模型表达的业务是否符合你的理解。
             </p>
+            {!!narrationReasoning && <ReasoningStream
+              text={narrationReasoning}
+              active={running === 'narrate' && !narration}
+              complete={running !== 'narrate' || !!narration}
+            />}
             {narration ? (
               <Markdown>{narration}</Markdown>
             ) : (
@@ -885,6 +917,7 @@ export function ReviewView({
         <BusinessProcessSupport
           assessment={assessment}
           running={running === 'assess'}
+          stream={assessmentStream}
           model={model}
           onDiscuss={onDiscuss}
           onAddFeedback={onAddFeedback}

@@ -20,6 +20,7 @@ import { documentToBlocks, readSse } from './document.ts'
 import { advanceRevision, freshness, initialRevisions } from './workspace.ts'
 import { extractQuestions } from '../shared/questions.ts'
 import BusinessUnderstanding from './components/BusinessUnderstanding.tsx'
+import ReasoningStream from './components/ReasoningStream.tsx'
 import { reviseUnderstandingSources } from '../shared/understanding-sources.ts'
 import ModelingRun from './components/ModelingRun.tsx'
 import { modelingProgress, latestModelTimings, prepareCompilationRetry, type ModelRunStatus, type ProgressItem } from './modeling-progress.ts'
@@ -39,6 +40,7 @@ import type {
   DiscussionRequest,
   AgentRuntimeId,
   ProviderId,
+  DiscussionEvent,
 } from '../shared/analysis.ts'
 import {
   DEFAULT_PROVIDER,
@@ -61,7 +63,7 @@ import type {
   WorkspacePage,
 } from './types.ts'
 import { restoreProject } from './persistence.ts'
-import { discussionText, isStageResult } from './responses.ts'
+import { isStageResult, parseDiscussionEvent } from './responses.ts'
 import { isRecord } from './values.ts'
 import { createId } from './id.ts'
 import {
@@ -142,11 +144,15 @@ function App() {
     useState<DiscussionSubject | null>(null)
   const [draft, setDraft] = useState('')
   const [discussing, setDiscussing] = useState(false)
+  const [discussionStream, setDiscussionStream] = useState({ text: '', reasoning: '' })
   const [editing, setEditing] = useState(false)
   const [editedNarrative, setEditedNarrative] = useState('')
   const [comparison, setComparison] = useState(false)
   const [readingStream, setReadingStream] = useState({ narrative: '', reasoning: '', complete: true })
   const [narratingText, setNarratingText] = useState('')
+  const [narrationReasoning, setNarrationReasoning] = useState('')
+  const [assessmentStream, setAssessmentStream] = useState({ text: '', reasoning: '' })
+  const [expressionStream, setExpressionStream] = useState({ text: '', reasoning: '', part: '' })
   const [modelActivity, setModelActivity] = useState<string[]>([])
   const [job, setJob] = useState<StageJob | null>(null)
   const [busy, setBusy] = useState(false)
@@ -359,8 +365,14 @@ function App() {
     if (stage === 'narrate') {
       setReviewMode('narration')
       setNarratingText('')
+      setNarrationReasoning('')
     }
-    if (stage === 'assess') setReviewMode('assessment')
+    if (stage === 'assess') {
+      setReviewMode('assessment')
+      setAssessmentStream({ text: '', reasoning: '' })
+    }
+    if (stage === 'verify' || stage === 'map')
+      setExpressionStream({ text: '', reasoning: '', part: '' })
     if (stage === 'understand')
       setReadingStream({ narrative: '', reasoning: '', complete: false })
     if (stage === 'model') {
@@ -454,6 +466,28 @@ function App() {
               }
             : current,
         )
+        if (stage === 'model' && event.part === 'semantic') {
+          const semanticReasoningPart = event.text.includes('提取业务事实')
+            ? 'facts' as const
+            : event.text.includes('组织业务故事')
+              ? 'stories' as const
+              : undefined
+          if (semanticReasoningPart) setProject(current => current.plan ? ({
+            ...current,
+            plan: { ...current.plan, semanticReasoning: '', semanticReasoningPart },
+          }) : current)
+          else setProject(current => current.plan ? ({
+            ...current,
+            plan: { ...current.plan, semanticReasoningPart: undefined },
+          }) : current)
+        }
+        if ((stage === 'model' || stage === 'map') && event.part === 'mapping')
+          setProject(current => current.plan ? ({
+            ...current,
+            plan: { ...current.plan, semanticReasoning: '', semanticReasoningPart: 'mapping' },
+          }) : current)
+        if (event.part === 'expression' || event.part === 'repair' || event.part === 'recheck')
+          setExpressionStream(current => ({ ...current, part: event.part || current.part }))
       }
       if (event.type === 'delta') {
         if (event.part === 'compile') setProject(current => current.plan ? ({
@@ -480,6 +514,22 @@ function App() {
           const field = event.reasoning ? 'reasoning' : 'narrative'
           setReadingStream(current => ({ ...current, [field]: current[field] + event.text }))
         }
+        if (stage === 'narrate') {
+          if (event.reasoning) setNarrationReasoning(current => current + event.text)
+          else setNarratingText(current => current + event.text)
+        }
+        if (stage === 'assess') {
+          setAssessmentStream(current => ({
+            ...current,
+            [event.reasoning ? 'reasoning' : 'text']: current[event.reasoning ? 'reasoning' : 'text'] + event.text,
+          }))
+        }
+        if (event.part === 'expression' || event.part === 'repair' || event.part === 'recheck')
+          setExpressionStream(current => ({
+            ...current,
+            part: event.part || current.part,
+            [event.reasoning ? 'reasoning' : 'text']: current[event.reasoning ? 'reasoning' : 'text'] + event.text,
+          }))
         if (stage === 'model' && event.part === 'basis') {
           const field = event.reasoning ? 'businessBasisReasoning' : 'businessBasis'
           setProject(current => current.plan && !current.plan.businessBasisComplete ? ({
@@ -489,7 +539,14 @@ function App() {
         if (stage === 'model' && event.reasoning && event.part === 'semantic')
           setProject(current => current.plan ? ({
             ...current,
-            plan: { ...current.plan, designReasoning: (current.plan.designReasoning || '') + event.text },
+            plan: current.plan.semanticReasoningPart
+              ? { ...current.plan, semanticReasoning: (current.plan.semanticReasoning || '') + event.text }
+              : { ...current.plan, designReasoning: (current.plan.designReasoning || '') + event.text },
+          }) : current)
+        if ((stage === 'model' || stage === 'map') && event.reasoning && event.part === 'mapping')
+          setProject(current => current.plan ? ({
+            ...current,
+            plan: { ...current.plan, semanticReasoning: (current.plan.semanticReasoning || '') + event.text },
           }) : current)
         if (stage === 'model' && event.reasoning && event.part === 'design-check')
           setProject(current => current.plan ? ({
@@ -497,8 +554,6 @@ function App() {
             plan: { ...current.plan, designCheckReasoning: (current.plan.designCheckReasoning || '') + event.text },
           }) : current)
         if (!event.reasoning) {
-          if (stage === 'narrate')
-            setNarratingText((current) => current + (event.text || ''))
           if (stage === 'model' && event.part === 'semantic')
             setProject((current) => current.plan?.designReview?.status === 'drafting' ? ({
               ...current, plan: { ...current.plan, designDraft: (current.plan.designDraft || '') + event.text },
@@ -547,6 +602,8 @@ function App() {
                 designDraft: current.plan?.designReview?.reason === 'interrupted' ? current.plan.designDraft : undefined,
                 designReasoning: current.plan?.designReasoning,
                 designCheckReasoning: current.plan?.designCheckReasoning,
+                semanticReasoning: current.plan?.semanticReasoning,
+                semanticReasoningPart: current.plan?.semanticReasoningPart,
                 basis: current.plan?.basis,
                 businessBasis: current.plan?.businessBasis,
                 businessBasisReasoning: current.plan?.businessBasisReasoning,
@@ -728,6 +785,8 @@ function App() {
               designDraft: result.designReview?.reason === 'interrupted' ? current.plan?.designDraft : undefined,
               designReasoning: current.plan?.designReasoning,
               designCheckReasoning: current.plan?.designCheckReasoning,
+              semanticReasoning: current.plan?.semanticReasoning,
+              semanticReasoningPart: current.plan?.semanticReasoningPart,
               basis: current.plan?.basis,
               businessBasis: result.businessBasis ?? current.plan?.businessBasis,
               businessBasisReasoning: current.plan?.businessBasisReasoning,
@@ -918,6 +977,7 @@ function App() {
     setDraft('')
     addMessage(user)
     setDiscussing(true)
+    setDiscussionStream({ text: '', reasoning: '' })
     try {
       const history = [
         ...project.messages.filter((message) => !message.stage),
@@ -930,7 +990,7 @@ function App() {
             ? '\n讨论对象：' + JSON.stringify(message.context)
             : ''),
       }))
-      const response = await fetch('/api/discuss', {
+      const response = await fetch('/api/discuss/stream', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -945,14 +1005,22 @@ function App() {
           messages: history,
         } satisfies DiscussionRequest),
       })
-      const result: unknown = await response.json()
       if (!response.ok)
-        throw new Error(
-          isRecord(result) && typeof result.error === 'string'
-            ? result.error
-            : '讨论失败',
-        )
-      addMessage({ role: 'assistant', content: discussionText(result) })
+        throw new Error('讨论服务返回 HTTP ' + response.status)
+      let result = ''
+      let streamedText = ''
+      await readSse<DiscussionEvent>(response, event => {
+        if (event.type === 'error') throw new Error(event.error)
+        if (event.type === 'result') result = event.text
+        if (event.type === 'delta') {
+          if (!event.reasoning) streamedText += event.text
+          setDiscussionStream(current => ({
+            ...current,
+            [event.reasoning ? 'reasoning' : 'text']: current[event.reasoning ? 'reasoning' : 'text'] + event.text,
+          }))
+        }
+      }, parseDiscussionEvent)
+      addMessage({ role: 'assistant', content: result || streamedText })
     } catch (failure) {
       addMessage({
         role: 'assistant',
@@ -1444,6 +1512,7 @@ function App() {
                 evidenceMode={evidenceMode}
                 onEvidenceMode={setEvidenceMode}
                 expressionFocus={expressionFocus}
+                expressionStream={expressionStream}
               />
             </>
           )}
@@ -1469,7 +1538,9 @@ function App() {
                 mode={reviewMode}
                 onMode={setReviewMode}
                 narration={narratingText || project.narration}
+                narrationReasoning={narrationReasoning}
                 assessment={project.assessment}
+                assessmentStream={assessmentStream}
                 running={job?.stage}
                 model={model}
                 onAddFeedback={appendAssessmentFeedback}
@@ -1606,7 +1677,17 @@ function App() {
                   )}
                 </div>
               ))}
-              {discussing && (
+              {discussing && (discussionStream.text || discussionStream.reasoning) ? (
+                <div className="chat-message">
+                  <span className="message-role">建模助手</span>
+                  {discussionStream.reasoning && <ReasoningStream
+                    text={discussionStream.reasoning}
+                    active={!discussionStream.text}
+                    complete={!!discussionStream.text}
+                  />}
+                  {discussionStream.text && <Markdown>{discussionStream.text}</Markdown>}
+                </div>
+              ) : discussing && (
                 <div className="chat-message">
                   <span className="typing-indicator">
                     <i />

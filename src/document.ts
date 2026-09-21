@@ -66,9 +66,10 @@ export function documentToBlocks(content: string): BusinessDocument['blocks'] {
     .filter((block) => block.text)
 }
 
-export async function readSse(
+export async function readSse<T = AnalysisEvent>(
   response: Response,
-  onEvent: (event: AnalysisEvent) => void,
+  onEvent: (event: T) => void,
+  parse: (value: unknown) => T = ((value: unknown) => parseAnalysisEvent(value) as T),
 ): Promise<void> {
   if (!response.body) throw new Error('分析服务没有返回流')
   const reader = response.body.getReader()
@@ -85,7 +86,7 @@ export async function readSse(
         .filter((line) => line.startsWith('data:'))
         .map((line) => line.slice(5).trim())
         .join('')
-      if (data) onEvent(parseAnalysisEvent(JSON.parse(data) as unknown))
+      if (data) onEvent(parse(JSON.parse(data) as unknown))
     }
     if (done) break
   }
@@ -95,6 +96,6 @@ export async function readSse(
       .filter((line) => line.startsWith('data:'))
       .map((line) => line.slice(5).trim())
       .join('')
-    if (data) onEvent(parseAnalysisEvent(JSON.parse(data) as unknown))
+    if (data) onEvent(parse(JSON.parse(data) as unknown))
   }
 }

@@ -5,8 +5,9 @@ import {
   discussionText,
   isStageResult,
   parseAnalysisEvent,
+  parseDiscussionEvent,
 } from './responses.ts'
-import type { AnalysisEvent } from '../shared/analysis.ts'
+import type { AnalysisEvent, DiscussionEvent } from '../shared/analysis.ts'
 
 test('design checkpoints accept free text and reject broken metadata without imposing document headings', () => {
   const value = { type: 'design-review', part: 'semantic', semanticPlan: '任意文本。', review: {
@@ -47,6 +48,21 @@ test('semantic plan events pass through the SSE boundary', () => {
     () => parseAnalysisEvent({ type: 'semantic-plan', part: 'semantic', semantic: { ...semantic, facts: 'invalid' } }),
     /语义计划结构无效/,
   )
+})
+
+test('frontend consumes discussion SSE deltas and reasoning', async () => {
+  const response = new Response(
+    'data: {"type":"delta","text":"正在分析","reasoning":true}\n\n' +
+    'data: {"type":"delta","text":"结论。"}\n\n' +
+    'data: {"type":"result","text":"结论。"}',
+  )
+  const events: DiscussionEvent[] = []
+  await readSse<DiscussionEvent>(response, event => events.push(event), parseDiscussionEvent)
+  assert.deepEqual(events, [
+    { type: 'delta', text: '正在分析', reasoning: true },
+    { type: 'delta', text: '结论。' },
+    { type: 'result', text: '结论。' },
+  ])
 })
 test('malformed transport envelopes and discussion failures are reported explicitly', () => {
   assert.throws(

@@ -191,3 +191,8 @@ export type AnalysisEvent =
   | StageEvent
   | { type: 'result'; result: AnalysisResult }
   | { type: 'error'; error: string }
+
+export type DiscussionEvent =
+  | { type: 'delta'; text: string; reasoning?: boolean }
+  | { type: 'result'; text: string }
+  | { type: 'error'; error: string }

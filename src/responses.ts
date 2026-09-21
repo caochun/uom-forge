@@ -3,6 +3,7 @@ import type {
   AnalysisEvent,
   AnalysisResult,
   AnalysisResults,
+  DiscussionEvent,
 } from '../shared/analysis.ts'
 import type { AnalysisStage } from './types.ts'
 import { isRecord } from './values.ts'
@@ -68,6 +69,17 @@ export function parseAnalysisEvent(value: unknown): AnalysisEvent {
       if (isRecord(value.result)) return value as AnalysisEvent
   }
   throw new Error('分析服务返回了无效事件')
+}
+
+export function parseDiscussionEvent(value: unknown): DiscussionEvent {
+  if (!isRecord(value)) throw new Error('讨论服务返回了无效事件')
+  if (value.type === 'delta' && typeof value.text === 'string')
+    return { type: 'delta', text: value.text, ...(value.reasoning === true ? { reasoning: true } : {}) }
+  if (value.type === 'result' && typeof value.text === 'string')
+    return { type: 'result', text: value.text }
+  if (value.type === 'error' && typeof value.error === 'string')
+    return { type: 'error', error: value.error }
+  throw new Error('讨论服务返回了无效事件')
 }
 export function isStageResult<S extends AnalysisStage>(
   stage: S,

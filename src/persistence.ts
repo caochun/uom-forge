@@ -216,6 +216,7 @@ function readPlan(value: unknown): SemanticPlan | null {
   if (!isRecord(value)) return null
   const { semantic: storedSemantic, basis: storedBasis, businessBasis: storedBusinessBasis, businessBasisComplete: storedBasisComplete,
     businessBasisReasoning: storedBasisReasoning,
+    semanticReasoning: storedSemanticReasoning, semanticReasoningPart: storedSemanticReasoningPart,
     designReview: storedReview, designDraft: storedDraft, designReasoning: storedDesignReasoning,
     designCheckReasoning: storedDesignCheckReasoning, compilation: storedCompilation, ...rest } = value
   const designReview = interruptDesignReview(readDesignReview(storedReview))
@@ -243,6 +244,9 @@ function readPlan(value: unknown): SemanticPlan | null {
     } : {}),
     ...(typeof storedBusinessBasis === 'string' ? { businessBasis: storedBusinessBasis, businessBasisComplete: storedBasisComplete === true } : {}),
     ...(typeof storedBasisReasoning === 'string' ? { businessBasisReasoning: storedBasisReasoning } : {}),
+    ...(typeof storedSemanticReasoning === 'string' ? { semanticReasoning: storedSemanticReasoning } : {}),
+    ...(storedSemanticReasoningPart === 'facts' || storedSemanticReasoningPart === 'stories' || storedSemanticReasoningPart === 'mapping'
+      ? { semanticReasoningPart: storedSemanticReasoningPart } : {}),
     complete: value.complete === true,
     compiled: value.compiled === true,
     warnings: strings(value.warnings),

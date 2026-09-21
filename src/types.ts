@@ -60,6 +60,12 @@ export interface SemanticPlan {
   // Display-only stream, kept separately from the basis sent to later stages.
   businessBasisReasoning?: string
   businessBasisComplete?: boolean
+  // Display-only reasoning from the semantic preparation handoff. The raw
+  // JSON is intentionally kept out of the user-facing transcript; the
+  // validated snapshots remain the source of truth for facts, stories and
+  // mappings.
+  semanticReasoning?: string
+  semanticReasoningPart?: 'facts' | 'stories' | 'mapping'
   // Preserve the document reading used to derive this run's businessBasis, including source
   // snapshots; later edits must not rewrite an old fact's provenance.
   basis?: Pick<Understanding, 'narrative' | 'sources'>

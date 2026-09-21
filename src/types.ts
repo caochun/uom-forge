@@ -54,6 +54,8 @@ export interface SemanticPlan {
   designDraft?: string
   compilation?: CompilationOutput
   businessBasis?: string
+  // Display-only stream, kept separately from the basis sent to later stages.
+  businessBasisReasoning?: string
   businessBasisComplete?: boolean
   // Preserve the document reading used to derive this run's businessBasis, including source
   // snapshots; later edits must not rewrite an old fact's provenance.

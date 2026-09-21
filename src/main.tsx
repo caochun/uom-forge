@@ -480,13 +480,15 @@ function App() {
           const field = event.reasoning ? 'reasoning' : 'narrative'
           setReadingStream(current => ({ ...current, [field]: current[field] + event.text }))
         }
+        if (stage === 'model' && event.part === 'basis') {
+          const field = event.reasoning ? 'businessBasisReasoning' : 'businessBasis'
+          setProject(current => current.plan && !current.plan.businessBasisComplete ? ({
+            ...current, plan: { ...current.plan, [field]: (current.plan[field] || '') + event.text },
+          }) : current)
+        }
         if (!event.reasoning) {
           if (stage === 'narrate')
             setNarratingText((current) => current + (event.text || ''))
-          if (stage === 'model' && event.part === 'basis')
-            setProject(current => current.plan && !current.plan.businessBasisComplete ? ({
-              ...current, plan: { ...current.plan, businessBasis: (current.plan.businessBasis || '') + event.text },
-            }) : current)
           if (stage === 'model' && event.part === 'semantic')
             setProject((current) => current.plan?.designReview?.status === 'drafting' ? ({
               ...current, plan: { ...current.plan, designDraft: (current.plan.designDraft || '') + event.text },
@@ -533,6 +535,7 @@ function App() {
                 designDraft: current.plan?.designReview?.reason === 'interrupted' ? current.plan.designDraft : undefined,
                 basis: current.plan?.basis,
                 businessBasis: current.plan?.businessBasis,
+                businessBasisReasoning: current.plan?.businessBasisReasoning,
                 businessBasisComplete: current.plan?.businessBasisComplete,
                 complete: true,
                 compiled: false,
@@ -711,6 +714,7 @@ function App() {
               designDraft: result.designReview?.reason === 'interrupted' ? current.plan?.designDraft : undefined,
               basis: current.plan?.basis,
               businessBasis: result.businessBasis ?? current.plan?.businessBasis,
+              businessBasisReasoning: current.plan?.businessBasisReasoning,
               businessBasisComplete: result.businessBasis !== undefined || current.plan?.businessBasisComplete,
               complete: true,
               compiled: true,

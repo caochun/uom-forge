@@ -539,14 +539,25 @@ test('free-text basis and partial design survive a draft round trip without lega
   for (const complete of [false, true]) {
     const stored: Project = { ...empty, plan: {
       plan: '设计没有固定章节。', businessBasis: '事实、故事和情形都可用自然语言描述。',
+      businessBasisReasoning: '先分辨事实与待确认内容。',
       businessBasisComplete: complete, complete: false, compiled: false,
       basis: { narrative: '本轮业务说明。' },
     } }
     const restored = restoreProject(JSON.parse(JSON.stringify(stored)), empty)
     assert.equal(restored.plan?.businessBasis, stored.plan?.businessBasis)
+    assert.equal(restored.plan?.businessBasisReasoning, stored.plan?.businessBasisReasoning)
     assert.equal(restored.plan?.businessBasisComplete, complete)
     assert.equal(restored.plan?.plan, stored.plan?.plan)
     assert.equal(restored.plan?.semantic, undefined)
     assert.deepEqual(restored.plan?.basis, { narrative: '本轮业务说明。', sources: undefined })
   }
+})
+
+test('basis reasoning survives interruption before body output and invalid stored reasoning is dropped', () => {
+  const plan = { plan: '', complete: false, compiled: false, businessBasisReasoning: '正在提炼事实。' }
+  const restored = restoreProject({ ...empty, plan }, empty)
+  assert.equal(restored.plan?.businessBasisReasoning, plan.businessBasisReasoning)
+  assert.equal(restored.plan?.businessBasis, undefined)
+  assert.equal(restored.plan?.businessBasisComplete, undefined)
+  assert.equal(restoreProject({ ...empty, plan: { ...plan, businessBasisReasoning: { invalid: true } } }, empty).plan?.businessBasisReasoning, undefined)
 })

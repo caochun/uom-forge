@@ -18,6 +18,7 @@ import { designReviewLabel } from '../../shared/design-review.ts'
 import QQDocEditor from 'qq-doc-clone'
 import ModelGraph from './ModelGraph.tsx'
 import CompilationStream from './CompilationStream.tsx'
+import ReasoningStream from './ReasoningStream.tsx'
 import { documentToHtml } from '../document.ts'
 import { relatedElements } from '../workspace.ts'
 import { type ModelingProgress } from '../modeling-progress.ts'
@@ -324,8 +325,11 @@ export function CandidateView({
             <h2>业务依据</h2>
             <p className="panel-subtitle">提炼事实、组织故事，明确模型需要表达什么；设计与表达检查共同使用本份依据。</p>
           </div><span className="muted">{progress.steps.find(step => step.id === 'basis')?.detail}</span></div>
+          {plan?.businessBasisReasoning && <ReasoningStream text={plan.businessBasisReasoning}
+            active={!!running && progress.active?.id === 'basis' && !plan.businessBasis && !plan.businessBasisComplete}
+            complete={!!plan.businessBasisComplete || !!plan.businessBasis} />}
           {plan?.businessBasis ? <Markdown>{plan.businessBasis}</Markdown> : (
-            <div className="empty-state">{progress.active?.id === 'basis' ? '正在从整理稿提炼事实、故事、规则与检验情形…' : '开始建模后，这里会展示从文档整理稿提炼的业务依据。'}</div>
+            <div className="empty-state">{progress.active?.id === 'basis' ? '正在从整理稿提炼事实、故事、规则与检验情形…' : plan?.businessBasisReasoning ? '本次尚未生成业务依据正文，已保留思考内容。' : '开始建模后，这里会展示从文档整理稿提炼的业务依据。'}</div>
           )}
           {plan?.basis && <details className="source-catalogue">
             <summary>本轮依据来自的文档整理稿</summary>

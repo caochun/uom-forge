@@ -215,6 +215,7 @@ function readAssessment(value: unknown): Assessment | null {
 function readPlan(value: unknown): SemanticPlan | null {
   if (!isRecord(value)) return null
   const { semantic: storedSemantic, basis: storedBasis, businessBasis: storedBusinessBasis, businessBasisComplete: storedBasisComplete,
+    businessBasisReasoning: storedBasisReasoning,
     designReview: storedReview, designDraft: storedDraft, compilation: storedCompilation, ...rest } = value
   const designReview = interruptDesignReview(readDesignReview(storedReview))
   let semantic: SemanticPlanV2 | undefined
@@ -238,6 +239,7 @@ function readPlan(value: unknown): SemanticPlan | null {
       },
     } : {}),
     ...(typeof storedBusinessBasis === 'string' ? { businessBasis: storedBusinessBasis, businessBasisComplete: storedBasisComplete === true } : {}),
+    ...(typeof storedBasisReasoning === 'string' ? { businessBasisReasoning: storedBasisReasoning } : {}),
     complete: value.complete === true,
     compiled: value.compiled === true,
     warnings: strings(value.warnings),

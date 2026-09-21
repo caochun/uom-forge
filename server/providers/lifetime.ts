@@ -5,13 +5,14 @@ export function createDeadline(
 ) {
   external?.throwIfAborted()
   const controller = new AbortController()
-  const timer = setTimeout(
+  // Zero means no execution deadline; caller cancellation remains active.
+  const timer = Number.isFinite(timeoutMs) && timeoutMs > 0 ? setTimeout(
     () =>
       controller.abort(
         new Error(`${label}超时（超过 ${Math.round(timeoutMs / 1000)} 秒）`),
       ),
     timeoutMs,
-  )
+  ) : undefined
   return {
     signal: external
       ? AbortSignal.any([external, controller.signal])
@@ -30,12 +31,12 @@ export function createProgressDeadline(
   const signal = AbortSignal.any([total.signal, inactivity.signal])
   let receivedOutput = false
   const schedule = (timeoutMs: number) =>
-    setTimeout(() => {
+    timeoutMs > 0 ? setTimeout(() => {
       const reason = receivedOutput
         ? `输出中断（连续 ${Math.round(timeoutMs / 1000)} 秒没有新内容）`
         : `等待首段输出超时（超过 ${Math.round(timeoutMs / 1000)} 秒）`
       inactivity.abort(new Error(`${label} ${reason}`))
-    }, timeoutMs)
+    }, timeoutMs) : undefined
   let timer = schedule(limits.firstOutputMs)
   return {
     signal,
@@ -52,7 +53,8 @@ export function createProgressDeadline(
   }
 }
 
-export function timeoutFromEnv(value: string | undefined, fallback = 300000): number {
+export function timeoutFromEnv(value: string | undefined, fallback = 0): number {
+  if (!value?.trim()) return fallback
   const parsed = Number(value)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
 }

@@ -58,7 +58,7 @@ SSE 使用 `part: reading / basis / semantic / design-check / compile`。`busine
 
 各次调用均可停止。模型 JSON 失败时保留业务依据、设计和旧模型，发送 `{ stage: 'compile', semanticPlan, businessBasis, narrative, provider }` 单独重试，不重新生成中间文本。只有最终模型校验通过才更新图。业务依据与设计正文直接流式展示；原始调用输出保存在本地草稿中用于诊断。运行进度、耗时及停止按钮在主区域可见，建模助手可收起。
 
-Pi 使用 `UOM_PI_TIMEOUT_MS` 限制一次阶段运行的总时长（默认 300 秒）；设计阶段包含其全部迭代，并与用户取消信号合并。服务错误、超时或断流不能被当成格式问题反复重试。
+Pi 默认不限制阶段运行时长，用户可以主动停止。`UOM_PI_TIMEOUT_MS` 不设置或设为 `0` 均表示无总时限；如需给实验设置时限，可显式指定正数毫秒值（设计阶段包含其全部迭代）。服务错误、超时或断流不能被当成格式问题反复重试。
 
 候选模型关系图按对象之间的联系自动排列，连线绕开卡片并标注方向。选中对象突出直接关系，可切换为只看相关对象；支持缩放、拖动画布、适应视图和展开查看。同类对象之间的多种关系共用回环路径，每条关系仍可独立选中；显示布局不改变模型语义。布局逻辑位于 `src/graph-layout.ts`，ELK 引擎按需加载，交互由 `src/components/ModelGraph.tsx` 实现。
 
@@ -150,7 +150,9 @@ for key creation and supported tools, including Pi Coding Agent.
 direct calls and all Pi agents. Requests without a selection use
 `GLM_REASONING_EFFORT` (default `max`; allowed: `low`, `high`, `max`) and
 `GLM_MAX_OUTPUT_TOKENS=32768` (up to `131072`). `GLM_API_TIMEOUT_MS` controls
-direct requests (default `300000`); `UOM_PI_TIMEOUT_MS` controls each Pi loop.
+direct requests, including review and compilation within the Pi workflow;
+`UOM_PI_TIMEOUT_MS` controls each Pi loop. Both default to `0` (no execution
+deadline); positive values opt into a deadline in milliseconds.
 GLM-5.3-Flash requires thinking: requests use `thinking.type=enabled` and
 `clear_thinking=false`, and Pi returns the original `reasoning_content` after
 tool calls. Tool arguments stream with `tool_stream=true`; GLM supports only
@@ -164,8 +166,10 @@ GPT uses the configured model (default `gpt-6-astra`) with
 `GPT_REASONING_EFFORT=medium` by default. It sends `reasoning_effort` and does not
 send DeepSeek's `thinking` parameter. Each call contains only the current stage's
 prompt; it does not start Codex or carry an ACP session's context.
-Both APIs default to a 300-second timeout; use `LLM_API_TIMEOUT_MS` or
-`GPT_API_TIMEOUT_MS` to override independently. Streaming, cancellation, timing
+All model APIs default to no execution deadline; `LLM_API_TIMEOUT_MS`,
+`GPT_API_TIMEOUT_MS`, `QWEN_API_TIMEOUT_MS` and `GLM_API_TIMEOUT_MS` accept `0`
+(unlimited) or a positive deadline in milliseconds. Existing positive settings
+still apply; set them to `0` to disable them. Streaming, cancellation, timing
 and retrying compilation from the saved semantic plan work with either provider.
 
 Codex ACP 的注册入口已注释停用，页面不再提供该选项，API 明确拒绝 `provider: "codex"`。

@@ -45,7 +45,7 @@ export function createCodexProvider(
     const deadline = createProgressDeadline(
       options.signal,
       {
-        firstOutputMs: timeoutFromEnv(env.CODEX_ACP_FIRST_OUTPUT_TIMEOUT_MS),
+        firstOutputMs: timeoutFromEnv(env.CODEX_ACP_FIRST_OUTPUT_TIMEOUT_MS, 300000),
         idleMs: timeoutFromEnv(env.CODEX_ACP_IDLE_TIMEOUT_MS, 90000),
         totalMs: timeoutFromEnv(env.CODEX_ACP_TIMEOUT_MS, 900000),
       },

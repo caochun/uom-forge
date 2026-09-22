@@ -73,6 +73,20 @@ import {
   receiveClarifications,
 } from './understanding.ts'
 
+function formatBuildStamp(value: string) {
+  if (value === 'unknown') return '时间未知'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date).replaceAll('/', '-')
+}
+
 const STORAGE = 'uom-forge-project-v3'
 const EMPTY_DOCUMENT = {
   name: '尚未上传业务文档',
@@ -1179,6 +1193,15 @@ function App() {
             <Network size={21} />
           </div>
           <strong>领域建模工作台</strong>
+          <span
+            className="app-version"
+            title={`版本 ${__APP_VERSION__}\n提交 ${__APP_COMMIT__}\n提交时间 ${__APP_COMMIT_TIME__}\n构建时间 ${__APP_BUILD_TIME__}\n环境 ${__APP_ENV__}`}
+          >
+            v{__APP_VERSION__} · {__APP_SHORT_COMMIT__}
+          </span>
+          <span className="app-build-time" title={`构建时间 ${__APP_BUILD_TIME__}`}>
+            {formatBuildStamp(__APP_BUILD_TIME__)}
+          </span>
         </div>
         <div className="topbar-actions">
           <div className="runtime-choice">

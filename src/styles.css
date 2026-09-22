@@ -88,6 +88,22 @@ h4 {
   font-size: 15px;
   white-space: nowrap;
 }
+.app-version {
+  color: #aebbd0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.app-build-time {
+  color: #c4cfdf;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
 .brand-mark {
   width: 32px;
   height: 32px;
@@ -2645,6 +2661,12 @@ textarea:focus,
   }
   .brand-lockup {
     font-size: 12px;
+  }
+  .app-version {
+    font-size: 9px;
+  }
+  .app-build-time {
+    font-size: 9px;
   }
   .brand-mark {
     width: 26px;

@@ -1,5 +1,5 @@
-// Only semantic fields cross a stage boundary. UI state and earlier document
-// quotations in an existing draft must never become hidden stage-two input.
+// Only model fields cross the Pi design boundary. UI state and earlier document
+// quotations in a draft must never become hidden design input.
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)

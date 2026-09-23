@@ -11,6 +11,7 @@ import {
 } from './validation/requests.ts'
 import { isRecord, errorMessage } from './validation/values.ts'
 import { publicModelOptions } from './providers/reasoning.ts'
+import type { StageAgents } from './stages/contracts.ts'
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = []
@@ -23,7 +24,10 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   }
 }
 
-export function createApiMiddleware(runTurn: RunTurn = runProviderTurn) {
+export function createApiMiddleware(
+  runTurn: RunTurn = runProviderTurn,
+  agents?: StageAgents,
+) {
   return async (
     request: IncomingMessage,
     response: ServerResponse,
@@ -124,6 +128,7 @@ export function createApiMiddleware(runTurn: RunTurn = runProviderTurn) {
         invoked = true
         const result = await runStage(input, runTurn, {
           signal: controller.signal,
+          ...(agents ? { agents } : {}),
           onEvent: streaming ? emit : undefined,
         })
         if (!controller.signal.aborted) {

@@ -123,7 +123,7 @@ try {
   }, null, 2))
   await writeFile(path.join(output, 'document.json'), JSON.stringify(document, null, 2))
   const options = {
-    provider: 'glm' as const, runtime: 'pi' as const, signal: controller.signal,
+    provider: 'glm' as const, signal: controller.signal,
     onEvent(event: StageEvent) {
       if (event.type === 'delta') return
       events.push({ ms: Math.round(performance.now() - started), ...event })
@@ -131,17 +131,17 @@ try {
         phase = event.part || phase
         console.log(`[${phase}] ${event.text}`)
       }
-      if (['business-basis', 'design-review', 'semantic-plan', 'model-plan', 'model-checkpoint', 'understanding-narrative'].includes(event.type))
+      if (['business-basis', 'design-review', 'model-design', 'understanding-narrative'].includes(event.type))
         saves.push(writeFile(path.join(output, `${events.length}-${event.type}.json`), JSON.stringify(event, null, 2)))
     },
   }
   const runTurn = createGlmProvider()
-  const result = await readBusiness(document, runTurn, options)
+  const result = await readBusiness(document, options)
   await writeFile(path.join(output, 'understanding.json'), JSON.stringify(result.understanding, null, 2))
-  const modeled = await buildModel({ narrative: result.understanding.narrative, understandingReview: result.understanding.review }, runTurn, options)
+  const modeled = await buildModel({ narrative: result.understanding.narrative }, runTurn, options)
   await writeFile(path.join(output, 'model.json'), JSON.stringify(modeled, null, 2))
   if (typeof modeled.businessBasis === 'string') await writeFile(path.join(output, 'business-basis.md'), modeled.businessBasis)
-  console.log(`Completed: ${modeled.validation.elements} elements; expression ${modeled.expressionReview.status}; ${call} requests.`)
+  console.log(`Completed: ${modeled.validation.elements} elements; ${call} requests.`)
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error)
   await writeFile(path.join(output, 'error.txt'), message)

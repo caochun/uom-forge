@@ -77,7 +77,7 @@ export function reviseUnderstanding(
 export function receiveClarifications(
   project: Project,
   items: BusinessClarification[],
-  source: 'model' | 'assess',
+  source: 'model',
 ): Project {
   if (
     !project.understanding ||

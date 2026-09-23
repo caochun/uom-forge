@@ -12,22 +12,18 @@ import {
 import Markdown from './Markdown.tsx'
 import { SourceCatalogue } from './SourceReferences.tsx'
 export { default as Markdown } from './Markdown.tsx'
-import BusinessProcessSupport from './BusinessProcessSupport.tsx'
 import { modelingContent } from '../../shared/clarifications.ts'
 import { designReviewLabel } from '../../shared/design-review.ts'
 import QQDocEditor from 'qq-doc-clone'
 import ModelGraph from './ModelGraph.tsx'
 import CompilationStream from './CompilationStream.tsx'
 import ReasoningStream from './ReasoningStream.tsx'
-import StructuredStream from './StructuredStream.tsx'
 import { documentToHtml } from '../document.ts'
 import { relatedElements } from '../workspace.ts'
 import { type ModelingProgress } from '../modeling-progress.ts'
 import type { ReactNode } from 'react'
 import type { Assessment } from '../../shared/analysis.ts'
 import type { CandidateModel } from '../../shared/model.ts'
-import type { SemanticPlanV2 } from '../../shared/semantic.ts'
-import SemanticEvidence, { type EvidenceMode } from './SemanticEvidence.tsx'
 import { EDITABLE_COLLECTIONS } from '../types.ts'
 import type {
   AnalysisStage,
@@ -37,11 +33,13 @@ import type {
   ModelViewMode,
   OnDiscuss,
   OnEdit,
-  ReviewViewMode,
-  SemanticPlan,
+  ModelDesign,
   StageTiming,
   WorkspaceDocument,
+  ReviewViewMode,
 } from '../types.ts'
+import BusinessProcessSupport from './BusinessProcessSupport.tsx'
+import StructuredStream from './StructuredStream.tsx'
 
 export function Switcher<T extends string>({
   label,
@@ -215,7 +213,6 @@ export function DocumentView({
   )
 }
 
-import ExpressionReview from './ExpressionReview.tsx'
 
 const COLLECTIONS = [
   ['objects', '对象关系'],
@@ -226,7 +223,7 @@ const COLLECTIONS = [
 type CollectionTab = (typeof COLLECTIONS)[number][0]
 interface CandidateViewProps {
   candidate: CandidateDraft | null
-  plan: SemanticPlan | null
+  plan: ModelDesign | null
   mode: ModelViewMode
   onMode: (mode: ModelViewMode) => void
   selectedId: string | null
@@ -234,15 +231,9 @@ interface CandidateViewProps {
   onDiscuss: OnDiscuss
   onEdit: OnEdit
   onAdd: (name: string, description: string) => void
-  onRebuild: () => void
-  canRebuild: boolean
   disabled: boolean
   running?: boolean
   progress: ModelingProgress
-  evidenceMode: EvidenceMode
-  onEvidenceMode: (mode: EvidenceMode) => void
-  expressionFocus: number
-  expressionStream?: { text: string; reasoning: string; part: string }
 }
 
 export function CandidateView({
@@ -255,15 +246,9 @@ export function CandidateView({
   onDiscuss,
   onEdit,
   onAdd,
-  onRebuild,
-  canRebuild,
   disabled,
   running,
   progress,
-  evidenceMode,
-  onEvidenceMode,
-  expressionFocus,
-  expressionStream,
 }: CandidateViewProps) {
   const [collection, setCollection] = useState<CollectionTab>('objects')
   const [adding, setAdding] = useState(false)
@@ -322,15 +307,12 @@ export function CandidateView({
         </div>
       </div>
       {mode === 'model' && plan?.compilation && <CompilationStream output={plan.compilation} active={!!running && progress.active?.id === 'compile' && plan.compilation.status === 'streaming'} />}
-      {mode === 'evidence' ? !plan?.semantic ? (
+      {mode === 'evidence' ? (
         <article className="panel-surface reading-narrative business-basis">
           <div className="panel-toolbar"><div>
             <h2>业务依据</h2>
             <p className="panel-subtitle">提炼事实、组织故事，明确模型需要表达什么；设计与表达检查共同使用本份依据。</p>
           </div><span className="muted">{progress.steps.find(step => step.id === 'basis')?.detail}</span></div>
-          {plan?.semanticReasoning && <ReasoningStream text={plan.semanticReasoning}
-            active={!!running && !!plan.semanticReasoningPart}
-            complete={!running || !plan.semanticReasoningPart} />}
           {plan?.businessBasisReasoning && <ReasoningStream text={plan.businessBasisReasoning}
             active={!!running && progress.active?.id === 'basis' && !plan.businessBasis && !plan.businessBasisComplete}
             complete={!!plan.businessBasisComplete || !!plan.businessBasis} />}
@@ -343,35 +325,6 @@ export function CandidateView({
             {plan.basis.sources && <SourceCatalogue sources={plan.basis.sources} />}
           </details>}
         </article>
-      ) : (
-        <>
-        {plan.semanticReasoning && <ReasoningStream
-          text={plan.semanticReasoning}
-          active={!!running && !!plan.semanticReasoningPart}
-          complete={!running || !plan.semanticReasoningPart}
-        />}
-        {!!plan?.semantic?.scenarios?.length && <details className="panel-surface narrative-body">
-          <summary>代表性业务情形 · {plan.semantic.scenarios.length} 项</summary>
-          <p className="muted">候选生成前形成的检验材料，用于建模与表达检查；情形中的假设实例不是新增业务事实。</p>
-          {plan.semantic.scenarios.map(item => <article className="reading-note" key={item.id}>
-            <strong>{item.statement}</strong><p>{item.scenario}</p><p>{item.distinction}</p>
-            <small>依据事实：{item.factIds.join('、')}</small>
-          </article>)}
-        </details>}
-        <SemanticEvidence
-          semantic={plan?.semantic}
-          sources={plan?.basis?.sources}
-          model={model}
-          modelEdited={progress.reviewStale || progress.steps.find((step) => step.id === 'mapping')?.state === 'stale'}
-          mappingDetail={progress.steps.find((step) => step.id === 'mapping')?.detail || ''}
-          mappingRunning={Boolean(running)}
-          onRebuild={onRebuild}
-          disabled={disabled || !canRebuild}
-          mode={evidenceMode}
-          onMode={onEvidenceMode}
-          onSelectElement={select}
-        />
-        </>
       ) : mode === 'decisions' ? (
         <article className="panel-surface reading-narrative">
           <div className="panel-toolbar">
@@ -392,7 +345,7 @@ export function CandidateView({
             <div className="empty-state">
               {progress.active?.id === 'decisions'
                 ? '正在判断对象边界和业务联系…'
-                : plan?.businessBasis || plan?.semantic
+                : plan?.businessBasis
                   ? '业务依据已保留，模型设计尚未形成。'
                   : '开始建模后，这里会解释模型的设计依据。'}
             </div>
@@ -401,7 +354,7 @@ export function CandidateView({
             <summary>{designReviewLabel(plan.designReview)} · 已检查 {plan.designReview.rounds.length} 轮</summary>
             <p className="muted">{plan.designReview.businessBasisVersion
               ? '沿用本轮业务依据中的检验情形，复查修订后的表达；通过仅针对本轮情形，不代表业务已穷尽。'
-              : '这份历史检查从业务说明选择情形；通过仅针对所选情形，不代表业务已穷尽。'}</p>
+            : '检查结论只针对本轮业务依据中的具体情形，不代表业务已穷尽。'}</p>
             {plan.designReview.rounds.map((round, index) => <section key={index}>
               <strong>第 {index + 1} 轮表达检查</strong>
               <Markdown>{round.feedback}</Markdown>
@@ -430,11 +383,9 @@ export function CandidateView({
               {progress.active.detail}…
             </div>
           )}
-          {(candidate?.edited ||
-            !!candidate?.expressionReview?.changes.length) &&
-            plan?.compiled && (
+          {candidate?.edited && plan?.compiled && (
               <Notice>
-                初始设计，模型已有调整。最新定义以模型视图为准，自动修正原因见候选模型复核。
+                初始设计，模型已有手工调整。最新定义以模型视图为准。
               </Notice>
             )}
         </article>
@@ -451,21 +402,7 @@ export function CandidateView({
                 : '当前显示上轮保留的模型，本轮尚未生成新候选。'}
             </Notice>
           )}
-          {candidate && !(running && progress.oldCandidate) && (
-            <>
-            {expressionStream && <StructuredStream
-              title={expressionStream.part === 'expression' ? '业务表达检查'
-                : expressionStream.part === 'repair' ? '模型定点修正'
-                  : expressionStream.part === 'recheck' ? '业务表达复查'
-                    : '候选模型复核输出'}
-              text={expressionStream.text}
-              reasoning={expressionStream.reasoning}
-              active={!!running && ['expression', 'repair', 'recheck'].includes(expressionStream.part)}
-              complete={!running}
-            />}
-            <ExpressionReview candidate={candidate} onSelect={select} focusRequest={expressionFocus} stale={progress.reviewStale} />
-            </>
-          )}
+          {candidate && running && progress.active?.id === 'compile' && <div className="reading-note">模型 JSON 正在编译，完成后会显示模型视图。</div>}
           <div className="model-summary">
             <h2>{model.name}</h2>
             <p>{model.summary}</p>
@@ -591,8 +528,6 @@ export function CandidateView({
                 model={model}
                 element={selected}
                 kind={selectedKind}
-                semantic={plan?.semantic}
-                mappingsStale={Boolean(candidate?.edited)}
                 onSelect={select}
                 onDiscuss={onDiscuss}
                 onEdit={onEdit}
@@ -603,18 +538,86 @@ export function CandidateView({
           </div>
         </>
       )}
-      {!!candidate?.historicalQuestions?.length && (
-        <details className="panel-surface model-questions">
-          <summary>旧版待确认事项 · 仅供查看</summary>
-          <p>
-            这些问题尚未按“依据、歧义、模型影响”核验，不会作为下一轮建模输入。请重新建模整理当前边界。
-          </p>
-          <ul>
-            {candidate.historicalQuestions.map((question, index) => (
-              <li key={index}>{question}</li>
-            ))}
-          </ul>
-        </details>
+    </section>
+  )
+}
+
+export function ReviewView({
+  mode,
+  onMode,
+  narration,
+  assessment,
+  running,
+  model,
+  onAddFeedback,
+  feedback,
+  feedbackDisabled,
+  onDiscuss,
+  onCompare,
+  comparison,
+  narrationReasoning = '',
+  assessmentStream,
+}: {
+  mode: ReviewViewMode
+  onMode: (mode: ReviewViewMode) => void
+  narration: string
+  assessment: Assessment | null
+  running?: AnalysisStage
+  model?: CandidateModel
+  onAddFeedback: (text: string) => void
+  feedback: string
+  feedbackDisabled: boolean
+  onDiscuss: OnDiscuss
+  onCompare: () => void
+  comparison?: string
+  narrationReasoning?: string
+  assessmentStream?: { text: string; reasoning: string }
+}) {
+  return (
+    <section className="review-view">
+      <div className="view-toolbar">
+        <Switcher
+          label="模型检验方式"
+          items={[
+            ['narration', '模型自述'],
+            ['assessment', '业务过程支撑'],
+          ]}
+          value={mode}
+          onChange={onMode}
+        />
+        {mode === 'narration' && narration && (
+          <button className="text-button" onClick={onCompare}>
+            {comparison ? '关闭对照' : '对照业务理解'}
+          </button>
+        )}
+      </div>
+      {mode === 'narration' ? (
+        <div className={comparison ? 'narration-comparison' : ''}>
+          {comparison && (
+            <article className="panel-surface">
+              <div className="panel-toolbar"><h2>业务理解</h2></div>
+              <Markdown>{comparison}</Markdown>
+            </article>
+          )}
+          <article className="panel-surface">
+            <div className="panel-toolbar"><h2>模型如何描述这项业务</h2></div>
+            <p className="reading-note">仅基于候选模型复述，用来检查模型表达的业务是否符合你的理解。</p>
+            {narrationReasoning && <ReasoningStream text={narrationReasoning} active={running === 'narrate' && !narration} complete={running !== 'narrate' || !!narration} />}
+            {narration ? <Markdown>{narration}</Markdown> : <div className="empty-state">{running === 'narrate' ? '正在生成模型自述…' : '候选模型生成后，运行模型检验。'}</div>}
+            {running === 'narrate' && <span className="typing-indicator"><i /><i /><i /></span>}
+          </article>
+        </div>
+      ) : (
+        <BusinessProcessSupport
+          assessment={assessment}
+          running={running === 'assess'}
+          stream={assessmentStream}
+          model={model}
+          onDiscuss={onDiscuss}
+          onAddFeedback={onAddFeedback}
+          feedback={feedback}
+          disabled={feedbackDisabled}
+        />
       )}
     </section>
   )
@@ -624,8 +627,6 @@ function ElementDetails({
   model,
   element,
   kind,
-  semantic,
-  mappingsStale,
   onSelect,
   onDiscuss,
   onEdit,
@@ -635,8 +636,6 @@ function ElementDetails({
   model: CandidateModel
   element: EditableElement
   kind: EditableCollection
-  semantic?: SemanticPlanV2
-  mappingsStale: boolean
   onSelect: (id: string) => void
   onDiscuss: OnDiscuss
   onEdit: OnEdit
@@ -670,9 +669,6 @@ function ElementDetails({
         .filter((item) => item !== undefined),
     )
   const related = kind === 'objects' ? relatedElements(model, element.id) : null
-  const derivedFacts = semantic
-    ? semantic.mappings.filter((mapping) => mapping.elementIds.includes(element.id))
-    : []
   return (
     <aside className="element-details panel-surface">
       <div className="panel-toolbar">
@@ -756,20 +752,6 @@ function ElementDetails({
             )}
           </>
         )}
-        {derivedFacts.length > 0 && (
-          <section>
-            <h4>
-              推导来源的业务事实
-              {mappingsStale && <span className="mapping-stale-label">修改前映射</span>}
-            </h4>
-            <ul className="semantic-derivation">
-              {derivedFacts.map((mapping) => {
-                const fact = semantic?.facts.find((item) => item.id === mapping.factId)
-                return fact ? <li key={mapping.factId}>{fact.statement}<span className="muted">（依据：{fact.source} · {mapping.coverage === 'full' ? '完整表达' : mapping.coverage === 'partial' ? '部分表达' : '尚未表达'}）</span></li> : null
-              })}
-            </ul>
-          </section>
-        )}
         <div className="button-row">
           <button
             className="secondary-button"
@@ -821,110 +803,5 @@ function ElementDetails({
         )}
       </div>
     </aside>
-  )
-}
-
-export function ReviewView({
-  mode,
-  onMode,
-  narration,
-  assessment,
-  running,
-  model,
-  onAddFeedback,
-  feedback,
-  feedbackDisabled,
-  onDiscuss,
-  onCompare,
-  comparison,
-  narrationReasoning = '',
-  assessmentStream,
-}: {
-  mode: ReviewViewMode
-  onMode: (mode: ReviewViewMode) => void
-  narration: string
-  assessment: Assessment | null
-  running?: AnalysisStage
-  model?: CandidateModel
-  onAddFeedback: (text: string) => void
-  feedback: string
-  feedbackDisabled: boolean
-  onDiscuss: OnDiscuss
-  onCompare: () => void
-  comparison?: string
-  narrationReasoning?: string
-  assessmentStream?: { text: string; reasoning: string }
-}) {
-  return (
-    <section className="review-view">
-      <div className="view-toolbar">
-        <Switcher
-          label="模型检验方式"
-          items={[
-            ['narration', '模型自述'],
-            ['assessment', '业务过程支撑'],
-          ]}
-          value={mode}
-          onChange={onMode}
-        />
-        {mode === 'narration' && narration && (
-          <button className="text-button" onClick={onCompare}>
-            {comparison ? '关闭对照' : '对照业务理解'}
-          </button>
-        )}
-      </div>
-      {mode === 'narration' ? (
-        <div className={comparison ? 'narration-comparison' : ''}>
-          {comparison && (
-            <article className="panel-surface">
-              <div className="panel-toolbar">
-                <h2>业务理解</h2>
-              </div>
-              <Markdown>{comparison}</Markdown>
-            </article>
-          )}
-          <article className="panel-surface">
-            <div className="panel-toolbar">
-              <h2>模型如何描述这项业务</h2>
-            </div>
-            <p className="reading-note">
-              仅基于候选模型复述，用来检查模型表达的业务是否符合你的理解。
-            </p>
-            {!!narrationReasoning && <ReasoningStream
-              text={narrationReasoning}
-              active={running === 'narrate' && !narration}
-              complete={running !== 'narrate' || !!narration}
-            />}
-            {narration ? (
-              <Markdown>{narration}</Markdown>
-            ) : (
-              <div className="empty-state">
-                {running === 'narrate'
-                  ? '正在生成模型自述…'
-                  : '候选模型生成后，运行模型检验。'}
-              </div>
-            )}
-            {running === 'narrate' && (
-              <span className="typing-indicator">
-                <i />
-                <i />
-                <i />
-              </span>
-            )}
-          </article>
-        </div>
-      ) : (
-        <BusinessProcessSupport
-          assessment={assessment}
-          running={running === 'assess'}
-          stream={assessmentStream}
-          model={model}
-          onDiscuss={onDiscuss}
-          onAddFeedback={onAddFeedback}
-          feedback={feedback}
-          disabled={feedbackDisabled}
-        />
-      )}
-    </section>
   )
 }

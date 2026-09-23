@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readBusiness } from './stages/understanding.ts'
+import { testAgents } from './testing/agents.ts'
 
 import type { StageEvent } from '../shared/analysis.ts'
 
@@ -16,26 +17,17 @@ test('reads once, publishes flexible narrative and extracts optional questions',
   const prompts: string[] = []
   const result = await readBusiness(
     document,
-    async (prompt, options) => {
+    { provider: 'gpt', agents: testAgents(async (prompt, options) => {
       prompts.push(prompt)
       assert.equal(options.provider, 'gpt')
-      if (prompt.includes('独立业务理解核对者')) return JSON.stringify({ gaps: [] })
       assert.ok(prompt.includes('DOC_ONLY_37'))
-      assert.doesNotMatch(
-        prompt,
-        /JSON Schema|kebab-case|外键|actions|functions/,
-      )
-      assert.match(
-        prompt,
-        /文档在说什么，是否说清楚、说一致了/,
-      )
+      assert.doesNotMatch(prompt, /JSON Schema|kebab-case|外键|actions|functions/)
+      assert.match(prompt, /文档在说什么，是否说清楚、说一致了/)
       options.onEvent?.({ type: 'delta', text: narrative })
       return narrative
-    },
-    { provider: 'gpt', onEvent: (event) => events.push(event) },
+    }), onEvent: (event) => events.push(event) },
   )
   assert.equal(prompts.length, 1)
-  assert.equal(result.understanding.review, undefined)
   assert.ok(result.understanding.warnings.every(warning => !warning.includes('未单列')))
   assert.equal(result.understanding.narrative, narrative)
   assert.deepEqual(result.understanding.questions, [
@@ -54,12 +46,11 @@ test('cancellation after reading prevents the second provider invocation', async
   await assert.rejects(
     readBusiness(
       document,
-      async () => {
+      { signal: controller.signal, agents: testAgents(async () => {
         calls++
         controller.abort()
         return narrative
-      },
-      { signal: controller.signal },
+      }) },
     ),
     { name: 'AbortError' },
   )
@@ -69,10 +60,10 @@ test('cancellation after reading prevents the second provider invocation', async
 test('an empty explanation never reaches the formatter', async () => {
   let calls = 0
   await assert.rejects(
-    readBusiness(document, async () => {
+    readBusiness(document, { agents: testAgents(async () => {
       calls++
       return ' \n'
-    }),
+    }) }),
     /未返回业务文档整理稿/,
   )
   assert.equal(calls, 1)
@@ -80,12 +71,11 @@ test('an empty explanation never reaches the formatter', async () => {
 
 test('understanding delivers validated paragraph references in both SSE and the result', async () => {
   const events: StageEvent[] = []
-  const result = await readBusiness(document, async (prompt) => {
+  const result = await readBusiness(document, { agents: testAgents(async (prompt) => {
     assert.match(prompt, /"id":"b1"/)
-    if (prompt.includes('独立业务理解核对者')) return JSON.stringify({ gaps: [] })
     assert.match(prompt, /\[\[source:/)
     return '## 业务概述\n\n业务说明中的转述。 [[source:b1]]'
-  }, { runtime: 'direct', onEvent: (event) => events.push(event) })
+  }), onEvent: (event) => events.push(event) })
   assert.equal(result.understanding.narrative, '## 业务概述\n\n业务说明中的转述。')
   assert.equal(result.understanding.sources?.blocks[0].text, document.blocks[0].text)
   assert.deepEqual(events.find((event) => event.type === 'understanding-narrative'), {

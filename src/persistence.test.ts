@@ -19,8 +19,6 @@ const empty: Project = {
   feedbackDocumentRevision: null,
   plan: null,
   candidate: null,
-  narration: '',
-  assessment: null,
   outputs: {},
   timings: {},
   revisions: initialRevisions,
@@ -66,58 +64,6 @@ test('understanding sources and the model’s original basis survive restoration
   assert.equal(restored.understanding?.sources?.blocks[0].text, '撤回申请原文。')
   assert.equal(restored.plan?.basis?.sources?.blocks[0].text, '提交申请原文。')
   assert.equal(restored.plan?.basis?.narrative, '客户提交。')
-})
-test('expression review survives save/restore, interrupted work is incomplete, and updated understanding makes it stale', () => {
-  const model = {
-    schemaVersion: '1',
-    name: '事项',
-    summary: '说明',
-    objects: [],
-    relations: [],
-    actions: [],
-    functions: [],
-    rules: [],
-    activities: [],
-    boundaries: [],
-  }
-  const stored = {
-    ...empty,
-    revisions: {
-      ...initialRevisions,
-      understoodDocument: 0,
-      business: 1,
-      candidateBasis: 1,
-      model: 2,
-    },
-    candidate: {
-      model,
-      revision: 2,
-      documentRevision: 0,
-      expressionReview: {
-        status: 'checking',
-        snapshots: [{ model }],
-        changes: [],
-        warnings: [],
-      },
-    },
-  }
-  const restored = restoreProject(JSON.parse(JSON.stringify(stored)), empty)
-  assert.equal(restored.candidate?.expressionReview?.status, 'incomplete')
-  assert.equal(restored.candidate?.expressionReview?.snapshots.length, 1)
-  assert.deepEqual(
-    restored.candidate?.expressionReview?.snapshots[0].model,
-    model,
-  )
-  assert.equal(freshness(restored.revisions).candidate, false)
-  assert.equal(
-    freshness({ ...restored.revisions, business: 2 }).candidate,
-    true,
-  )
-  const again = restoreProject(JSON.parse(JSON.stringify(restored)), empty)
-  assert.deepEqual(
-    again.candidate?.expressionReview,
-    restored.candidate?.expressionReview,
-  )
 })
 test('restoring an existing draft preserves the document, edits, answers, feedback and timing history', () => {
   const stored = {
@@ -228,11 +174,10 @@ test('restoring an existing draft preserves the document, edits, answers, feedba
   )
   assert.deepEqual(restored.document, stored.document)
   assert.deepEqual(restored.plan, stored.plan)
-  const { questions: priorQuestions, ...model } = stored.candidate.model
+  const { questions: _priorQuestions, ...model } = stored.candidate.model
   assert.deepEqual(restored.candidate, {
     ...stored.candidate,
     model: { ...model, boundaries: [] },
-    historicalQuestions: priorQuestions,
   })
   assert.deepEqual(restored.answers, stored.answers)
   assert.equal(restored.feedbackDocumentRevision, 2)
@@ -249,125 +194,6 @@ test('restoring an existing draft preserves the document, edits, answers, feedba
   assert.deepEqual(restored.messages[0].context, stored.messages[0].context)
 })
 
-test('restoring a valid semantic plan preserves its fact, story and mapping chain', () => {
-  const semantic = {
-    schemaVersion: '2',
-    status: 'mapped',
-    facts: [
-      {
-        id: 'fact-1',
-        statement: '客户提交订单',
-        kind: 'event',
-        actors: ['客户'],
-        objects: ['订单'],
-        conditions: [],
-        source: '客户提交订单',
-        certainty: 'explicit',
-      },
-    ],
-    stories: [
-      {
-        id: 'story-1',
-        name: '下单',
-        goal: '提交订单',
-        factIds: ['fact-1'],
-        steps: [
-          { order: 1, actor: '客户', action: '提交', object: '订单', factIds: ['fact-1'] },
-        ],
-      },
-    ],
-    mappings: [
-      {
-        factId: 'fact-1',
-        elementIds: ['submit-order'],
-        mappingType: 'action',
-        explanation: '提交动作表达该事实',
-        coverage: 'full',
-      },
-    ],
-    boundaries: [],
-    clarifications: [],
-  }
-  const restored = restoreProject(
-    { ...empty, plan: { plan: '说明', complete: true, compiled: false, semantic } },
-    empty,
-  )
-  assert.deepEqual(restored.plan?.semantic, semantic)
-})
-
-test('malformed semantic plans are dropped at the storage boundary', () => {
-  const restored = restoreProject(
-    {
-      ...empty,
-      plan: {
-        plan: '说明',
-        complete: true,
-        compiled: false,
-        semantic: { facts: 'invalid', stories: [], mappings: [], boundaries: [], clarifications: [] },
-      },
-    },
-    empty,
-  )
-  assert.equal(restored.plan?.semantic, undefined)
-})
-test('partial semantic snapshots survive a draft reload', () => {
-  const semantic = {
-    schemaVersion: '2',
-    status: 'facts',
-    facts: [
-      {
-        id: 'fact-1', statement: '客户提交订单', kind: 'event',
-        actors: ['客户'], objects: ['订单'], conditions: [],
-        source: '客户提交订单', certainty: 'explicit',
-      },
-    ],
-    stories: [], mappings: [], boundaries: [], clarifications: [],
-  }
-  const restored = restoreProject(
-    { ...empty, plan: { plan: '', complete: false, compiled: false, semantic } },
-    empty,
-  )
-  assert.equal(restored.plan?.semantic?.status, 'facts')
-  assert.equal(restored.plan?.semantic?.facts[0].source, '客户提交订单')
-})
-test('old layout drafts retain object/relation/capability semantics without creating an empty candidate', () => {
-  const restored = restoreProject(
-    {
-      objects: [{ id: 'matter', name: '事项', description: '边界' }],
-      relations: [
-        { id: 'related', label: '关联', fromId: 'matter', toId: 'matter' },
-      ],
-      capabilities: [
-        {
-          id: 'record',
-          name: '登记',
-          kind: '操作',
-          targets: ['matter'],
-          effects: ['创建记录'],
-        },
-        {
-          id: 'query',
-          name: '查询',
-          kind: '只读能力',
-          targets: ['matter'],
-          output: '事项集合',
-        },
-      ],
-      modelingState: { plan: '建模说明', complete: true },
-      questionAnswers: { 0: '确认' },
-      modelNarrative: '事项与操作',
-    },
-    empty,
-  )
-  assert.equal(restored.candidate?.model.relations[0].from, 'matter')
-  assert.equal(restored.candidate?.model.relations[0].name, '关联')
-  assert.deepEqual(restored.candidate?.model.actions[0].effects, ['创建记录'])
-  assert.equal(restored.candidate?.model.functions[0].output, '事项集合')
-  assert.equal(restored.plan?.plan, '建模说明')
-  assert.equal(restored.answers[0], '确认')
-  assert.equal(restored.narration, '事项与操作')
-  assert.equal(restoreProject({ objects: [] }, empty).candidate, null)
-})
 test('invalid storage does not masquerade as a typed project or restart interrupted work', () => {
   assert.equal(restoreProject(null, empty), empty)
   const restored = restoreProject(
@@ -386,98 +212,6 @@ test('invalid storage does not masquerade as a typed project or restart interrup
   assert.deepEqual(restored.answers, {})
   assert.equal(restored.timings.understand?.[0].status, 'failed')
   assert.equal(restored.messages[0].progress, false)
-})
-
-test('saved assessments retain requirement mappings and old conclusions never gain invented mappings', () => {
-  const assessment = {
-    summary: '说明',
-    recommendations: ['共性建议'],
-    questions: ['问题'],
-    processAssessments: [
-      {
-        processId: 'p',
-        processName: '办理',
-        status: 'partial',
-        reason: '缺少办理联系',
-        evidence: [],
-        requirements: [
-          {
-            requirement: '保存办理主体',
-            status: 'partial',
-            elements: ['object'],
-            explanation: '主体已存在，但没有关联到事项',
-            gap: '缺少联系',
-            suggestion: '补充办理关系',
-            evidence: [{ quote: '办理事项' }],
-          },
-        ],
-      },
-    ],
-  }
-  const restored = restoreProject({ ...empty, assessment }, empty)
-  const { questions: priorQuestions, ...currentAssessment } = assessment
-  assert.deepEqual(restored.assessment, {
-    ...currentAssessment,
-    clarifications: [],
-    historicalQuestions: priorQuestions,
-  })
-  const legacy = {
-    ...assessment,
-    processAssessments: [
-      {
-        processId: 'p',
-        processName: '办理',
-        status: 'partial',
-        coveredElements: ['object'],
-        gaps: ['缺少联系'],
-        evidence: [],
-      },
-    ],
-  }
-  const old = restoreProject({ ...empty, assessment: legacy }, empty)
-  assert.equal(old.assessment?.summary, '说明')
-  assert.equal(old.assessment?.processAssessments[0].reason, '缺少联系')
-  assert.deepEqual(old.assessment?.processAssessments[0].requirements, [])
-  assert.match(JSON.stringify(old.assessment), /coveredElements/)
-})
-
-test('old model questionnaires remain history, invalidate the old candidate once and never become active business questions', () => {
-  const old = {
-    ...empty,
-    candidate: {
-      model: {
-        schemaVersion: '1',
-        name: '旧模型',
-        summary: '旧说明',
-        objects: [],
-        relations: [],
-        actions: [],
-        functions: [],
-        rules: [],
-        activities: [],
-        questions: ['是否增加审批？', '需要哪些技术字段？'],
-      },
-      revision: 1,
-      documentRevision: 0,
-    },
-    revisions: { ...empty.revisions, business: 2, candidateBasis: 2 },
-  }
-  const migrated = restoreProject(old, empty)
-  assert.deepEqual(
-    migrated.candidate?.historicalQuestions,
-    old.candidate.model.questions,
-  )
-  assert.equal('questions' in migrated.candidate!.model, false)
-  assert.deepEqual(migrated.candidate?.model.boundaries, [])
-  assert.equal(migrated.revisions.business, 3)
-  assert.equal(migrated.revisions.candidateBasis, 2)
-  assert.equal(migrated.understanding, null)
-  const restored = restoreProject(JSON.parse(JSON.stringify(migrated)), empty)
-  assert.equal(restored.revisions.business, 3)
-  assert.deepEqual(
-    restored.candidate?.historicalQuestions,
-    old.candidate.model.questions,
-  )
 })
 
 test('saved confirmations in old drafts become revised understanding once; unsaved edits stay drafts', () => {
@@ -502,8 +236,6 @@ test('saved confirmations in old drafts become revised understanding once; unsav
       planBasis: 2,
       candidateBasis: 2,
       model: 1,
-      assessmentBasis: 1,
-      narrationBasis: 1,
     },
   }
   const migrated = restoreProject(stored, empty)
@@ -535,7 +267,7 @@ test('saved confirmations in old drafts become revised understanding once; unsav
   assert.equal(hasUnsavedAnswers(editing), true)
 })
 
-test('free-text basis and partial design survive a draft round trip without legacy semantic records', () => {
+test('free-text basis and partial design survive a draft round trip', () => {
   for (const complete of [false, true]) {
     const stored: Project = { ...empty, plan: {
       plan: '设计没有固定章节。', businessBasis: '事实、故事和情形都可用自然语言描述。',
@@ -552,7 +284,6 @@ test('free-text basis and partial design survive a draft round trip without lega
     assert.equal(restored.plan?.designCheckReasoning, stored.plan?.designCheckReasoning)
     assert.equal(restored.plan?.businessBasisComplete, complete)
     assert.equal(restored.plan?.plan, stored.plan?.plan)
-    assert.equal(restored.plan?.semantic, undefined)
     assert.deepEqual(restored.plan?.basis, { narrative: '本轮业务说明。', sources: undefined })
   }
 })

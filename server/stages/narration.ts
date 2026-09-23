@@ -1,6 +1,7 @@
 import type { CandidateModel } from '../../shared/model.ts'
 import type { RunTurn } from '../providers/types.ts'
 import type { StageOptions } from './contracts.ts'
+import { scopedTurn } from './contracts.ts'
 import { ANALYST_INSTRUCTIONS } from './prompts.ts'
 import { modelContext } from './model-context.ts'
 
@@ -20,7 +21,7 @@ export async function narrateModel(
   runTurn: RunTurn,
   options: StageOptions = {},
 ): Promise<{ narrative: string }> {
-  const narrative = await runTurn(modelNarrativePrompt(model), options)
+  const narrative = await runTurn(modelNarrativePrompt(model), scopedTurn(options, 'narrate'))
   options.signal?.throwIfAborted()
   if (!narrative.trim()) throw new Error('未返回模型自述。')
   return { narrative: narrative.trim() }

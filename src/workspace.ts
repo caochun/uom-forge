@@ -7,8 +7,9 @@ export interface Revisions {
   planBasis: number | null
   candidateBasis: number | null
   model: number
-  narrationBasis: number | null
-  assessmentBasis: number | null
+  /** Model self-description and support assessment are based on this model revision. */
+  narrationBasis?: number | null
+  assessmentBasis?: number | null
 }
 export const initialRevisions: Revisions = {
   document: 0,
@@ -66,6 +67,14 @@ export function advanceRevision(
       return { ...state, assessmentBasis: state.model }
   }
 }
+
+export function reviewFreshness(state: Revisions) {
+  const candidate = freshness(state).candidate
+  return {
+    narration: candidate || state.narrationBasis !== state.model,
+    assessment: candidate || state.assessmentBasis !== state.model,
+  }
+}
 export function freshness(state: Revisions) {
   const understanding = state.understoodDocument !== state.document
   const plan = understanding || state.planBasis !== state.business
@@ -74,8 +83,6 @@ export function freshness(state: Revisions) {
     understanding,
     plan,
     candidate,
-    narration: candidate || state.narrationBasis !== state.model,
-    assessment: candidate || state.assessmentBasis !== state.model,
   }
 }
 

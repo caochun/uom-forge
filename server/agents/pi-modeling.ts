@@ -1,26 +1,34 @@
 import { Agent, type AgentTool } from '@earendil-works/pi-agent-core'
 import { Type } from '@earendil-works/pi-ai'
-import type { ModelingInput } from '../../shared/analysis.ts'
+import { DEFAULT_PROVIDER, type ModelingInput } from '../../shared/analysis.ts'
 import type { DesignReview } from '../../shared/design-review.ts'
 import { designReviewLabel } from '../../shared/design-review.ts'
 import { artifactVersion } from '../../shared/workflow.ts'
 import type { StageOptions } from '../stages/contracts.ts'
 import { scopedTurn } from '../stages/contracts.ts'
 import type { RunTurn } from '../providers/types.ts'
-import { semanticModelPrompt } from '../stages/prompts.ts'
+import { modelDesignPrompt } from '../stages/prompts.ts'
 import { normalizeModelPlan } from '../stages/markdown-sections.ts'
 import { designReviewPrompt, designVerdict } from '../stages/design-review.ts'
 import { createPiModel, createPiStream, throwIfPiFailed } from '../providers/pi.ts'
 import { piSignal } from './runtime.ts'
 
 const MAX_ROUNDS = 3
-const LOOP_INSTRUCTIONS = `本轮在模型设计阶段迭代。先在正文输出完整、简洁的当前设计，然后在同一轮调用 check_expression。工具自动读取这份正文，不要把设计再复制进参数。不需要提交或 finish 工具。
-工具返回独立审阅意见，只有具体业务表达缺口才修改相关定义；保留不受影响的定义，复查已有情形。意见不是业务事实，业务未决时保留边界，不代替用户决定。修订轮同样输出一份完整设计并调用检查，不输出计划、交接说明或重复检查报告。最多检查三轮。`
+const LOOP_INSTRUCTIONS = `Pi 设计迭代：
+- 每轮先输出一份完整而简洁的当前模型设计，再在同一轮调用 check_expression。
+- check_expression 会自动读取这份正文；不要把设计复制到工具参数中。
+- 不需要调用提交或 finish 工具。
+- 工具返回独立审阅意见。只有意见指出了有业务依据的表达缺口时，才修改受影响的定义。
+- 保留没有受到影响的定义，并重新检查已经通过的情形。
+- 审阅意见不是新的业务事实；业务本身未决时保留边界，不替用户选择答案。
+- 审阅会检查实例区分、参与关系、状态保存和结果归属，但只在业务依据明确要求这些内容时落实，不根据常识补造。
+- 修订轮仍然输出完整设计并调用检查；不要输出计划、交接说明或重复整份检查报告。
+- 最多进行三轮检查。`
 
 export async function runPiModeling(
   input: ModelingInput, runTurn: RunTurn, options: StageOptions, businessBasis: string,
-): Promise<{ semanticPlan: string; designReview: DesignReview }> {
-  const provider = options.provider || 'gpt'
+): Promise<{ modelDesign: string; designReview: DesignReview }> {
+  const provider = options.provider || DEFAULT_PROVIDER
   const model = createPiModel(provider, process.env, options.reasoningEffort)
   const streamFn = createPiStream(provider, () => false, process.env, options.reasoningEffort)
   const deadline = piSignal(options, 'Pi 模型设计')
@@ -28,14 +36,14 @@ export async function runPiModeling(
   let turnDesign = ''
   let checkedTurn = 0
   let review: DesignReview = { status: 'drafting', round: 0, rounds: [], narrativeVersion: artifactVersion(input.narrative), businessBasisVersion: artifactVersion(businessBasis) }
-  const publish = (semanticPlan?: string) => {
-    options.onEvent?.({ type: 'design-review', part: 'semantic', review: structuredClone(review),
-      ...(semanticPlan !== undefined ? { semanticPlan } : {}) })
+  const publish = (modelDesign?: string) => {
+    options.onEvent?.({ type: 'design-review', part: 'design', review: structuredClone(review),
+      ...(modelDesign !== undefined ? { modelDesign } : {}) })
   }
   const stop = (reason: DesignReview['reason']) => {
     review = { ...review, status: reason === 'sufficient' ? 'completed' : 'attention', reason }
     publish()
-    options.onEvent?.({ type: 'phase', part: 'semantic', text: designReviewLabel(review) })
+    options.onEvent?.({ type: 'phase', part: 'design', text: designReviewLabel(review) })
   }
   const terminal = () => review.status === 'completed' || review.status === 'attention'
   const feedback = () => review.rounds.at(-1)?.feedback || '检查没有完成，保留当前设计供审阅。'
@@ -73,7 +81,7 @@ export async function runPiModeling(
   const parameters = Type.Object({})
   const tool: AgentTool<typeof parameters> = {
     name: 'check_expression', label: '检查设计的业务表达',
-    description: '沿用本轮业务依据及其中的检验情形，检查正文中的模型设计，返回语义缺口或未决边界。先输出设计正文；无须传入设计或事实 JSON。',
+    description: '沿用本轮业务依据和检验情形，检查当前正文能否表达具体事实或业务过程。检查参与关系、实例区分、状态保存和结果归属，但只检查业务依据明确涉及的内容。先输出完整设计；工具不需要设计或事实 JSON 参数。',
     parameters,
     execute: async () => {
       await check()
@@ -93,12 +101,12 @@ export async function runPiModeling(
       turnDesign = ''
       review = { ...review, status: 'drafting', round: review.round + 1, reason: undefined, feedbackDraft: undefined }
       publish()
-      options.onEvent?.({ type: 'phase', part: 'semantic', text: designReviewLabel(review) })
+      options.onEvent?.({ type: 'phase', part: 'design', text: designReviewLabel(review) })
     }
     if (event.type === 'message_update') {
       const update = event.assistantMessageEvent
-      if (update.type === 'text_delta') options.onEvent?.({ type: 'delta', part: 'semantic', text: update.delta, size: update.delta.length })
-      if (update.type === 'thinking_delta') options.onEvent?.({ type: 'delta', part: 'semantic', text: update.delta, reasoning: true })
+      if (update.type === 'text_delta') options.onEvent?.({ type: 'delta', part: 'design', text: update.delta, size: update.delta.length })
+      if (update.type === 'thinking_delta') options.onEvent?.({ type: 'delta', part: 'design', text: update.delta, reasoning: true })
     }
     if (event.type === 'message_end' && event.message.role === 'assistant' &&
       (event.message.stopReason === 'stop' || event.message.stopReason === 'toolUse')) {
@@ -126,16 +134,16 @@ export async function runPiModeling(
   deadline.signal.addEventListener('abort', abort, { once: true })
   try {
     deadline.signal.throwIfAborted()
-    await agent.prompt(semanticModelPrompt(input, businessBasis))
+    await agent.prompt(modelDesignPrompt(input, businessBasis))
     deadline.signal.throwIfAborted()
     throwIfPiFailed(agent, provider)
     if (!design) throw new Error('未返回模型设计。')
-    return { semanticPlan: design, designReview: review }
+    return { modelDesign: design, designReview: review }
   } catch (error) {
     if (review.round) stop('interrupted')
     deadline.signal.throwIfAborted()
     if (!design) throw error
-    return { semanticPlan: design, designReview: review }
+    return { modelDesign: design, designReview: review }
   } finally {
     deadline.signal.removeEventListener('abort', abort)
     deadline.dispose()

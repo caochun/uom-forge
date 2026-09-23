@@ -7,7 +7,7 @@ import { glmGenerationOptions } from './glm.ts'
 import { selectedReasoning } from './reasoning.ts'
 import type { ReasoningEffort } from '../../shared/reasoning.ts'
 
-/** Shared by understanding, semantic modeling and JSON repair. */
+/** Shared by business understanding, model design and JSON repair. */
 export function createPiModel(
   provider: ProviderId,
   env: NodeJS.ProcessEnv = process.env,

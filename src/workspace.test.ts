@@ -10,8 +10,6 @@ const completed = (): Revisions =>
     'understanding',
     'plan',
     'candidate',
-    'narration',
-    'assessment',
   ])
 
 test('changes invalidate all downstream results, preserving their basis for review', () => {
@@ -19,14 +17,10 @@ test('changes invalidate all downstream results, preserving their basis for revi
     understanding: false,
     plan: false,
     candidate: false,
-    narration: false,
-    assessment: false,
   })
   for (const event of ['business', 'document'] as const) {
     const state = advanceRevision(completed(), event)
     assert.equal(freshness(state).candidate, true)
-    assert.equal(freshness(state).narration, true)
-    assert.equal(freshness(state).assessment, true)
     assert.equal(state.model, completed().model)
   }
 })
@@ -36,6 +30,4 @@ test('finishing a new plan does not make an old graph current; compiling invalid
   assert.equal(freshness(state).candidate, true)
   const compiled = advanceRevision(state, 'candidate')
   assert.equal(freshness(compiled).candidate, false)
-  assert.equal(freshness(compiled).narration, true)
-  assert.equal(freshness(compiled).assessment, true)
 })

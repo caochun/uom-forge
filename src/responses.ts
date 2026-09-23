@@ -1,4 +1,3 @@
-import { readUnderstandingReview } from '../shared/workflow.ts'
 import type {
   AnalysisEvent,
   AnalysisResult,
@@ -7,11 +6,10 @@ import type {
 } from '../shared/analysis.ts'
 import type { AnalysisStage } from './types.ts'
 import { isRecord } from './values.ts'
-import { validateSemanticPlan } from '../shared/semantic-validation.ts'
 import { readDesignReview } from '../shared/design-review.ts'
 
 // The server validates business payloads. This boundary checks the SSE envelope
-// and revalidates the persisted semantic handoff before it reaches UI state.
+// before it is applied to the current draft.
 export function parseAnalysisEvent(value: unknown): AnalysisEvent {
   if (!isRecord(value)) throw new Error('分析服务返回了无效事件')
   switch (value.type) {
@@ -26,10 +24,10 @@ export function parseAnalysisEvent(value: unknown): AnalysisEvent {
       if (isRecord(value.timing) && typeof value.timing.callId === 'string')
         return value as AnalysisEvent
       break
-    case 'model-plan':
+    case 'model-design':
       if (
-        typeof value.semanticPlan === 'string' &&
-        value.part === 'semantic' &&
+        typeof value.modelDesign === 'string' &&
+        value.part === 'design' &&
         Array.isArray(value.clarifications)
       )
         return value as AnalysisEvent
@@ -39,29 +37,10 @@ export function parseAnalysisEvent(value: unknown): AnalysisEvent {
       break
     case 'design-review': {
       const review = readDesignReview(value.review)
-      if (value.part === 'semantic' && review && (value.semanticPlan === undefined || typeof value.semanticPlan === 'string'))
-        return { type: 'design-review', part: 'semantic', review, ...(typeof value.semanticPlan === 'string' ? { semanticPlan: value.semanticPlan } : {}) }
+      if (value.part === 'design' && review && (value.modelDesign === undefined || typeof value.modelDesign === 'string'))
+        return { type: 'design-review', part: 'design', review, ...(typeof value.modelDesign === 'string' ? { modelDesign: value.modelDesign } : {}) }
       break
     }
-    case 'semantic-plan':
-      if (value.part === 'semantic' && isRecord(value.semantic))
-        return {
-          type: 'semantic-plan',
-          part: 'semantic',
-          semantic: validateSemanticPlan(value.semantic),
-        }
-      break
-    case 'model-checkpoint':
-      if (
-        isRecord(value.model) &&
-        isRecord(value.expressionReview) &&
-        Array.isArray(value.expressionReview.snapshots)
-      )
-        return value as AnalysisEvent
-      break
-    case 'understanding-review':
-      if (value.review !== undefined) return { type: 'understanding-review', review: readUnderstandingReview(value.review)! }
-      break
     case 'understanding-narrative':
       if (typeof value.narrative === 'string') return value as AnalysisEvent
       break
@@ -87,14 +66,12 @@ export function isStageResult<S extends AnalysisStage>(
 ): result is AnalysisResults[S] {
   const fields = {
     understand: ['understanding'],
-    model: ['semanticPlan', 'model', 'clarifications', 'expressionReview'],
-    compile: ['semanticPlan', 'model', 'clarifications', 'expressionReview'],
-    verify: ['semanticPlan', 'model', 'clarifications', 'expressionReview'],
-    map: ['semanticPlan', 'model', 'clarifications', 'expressionReview'],
+    model: ['modelDesign', 'model', 'clarifications'],
+    compile: ['modelDesign', 'model', 'clarifications'],
     narrate: ['narrative'],
     assess: ['assessment'],
   } as const
-  return fields[stage].every((field) => field in result)
+  return fields[stage].every((field: string) => field in result)
 }
 export function discussionText(value: unknown): string {
   if (!isRecord(value)) throw new Error('讨论服务返回了无效结果')

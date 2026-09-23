@@ -4,7 +4,7 @@ import { isRecord, parseJsonOutput } from './values.ts'
 
 const COLLECTIONS = ['objects', 'relations', 'actions', 'functions', 'rules', 'activities'] as const
 
-/** Add fields that carry no semantics in the plan-only compilation round. */
+/** Add fields that carry no semantics in the design-only compilation round. */
 function normalizeCompiledValue(value: unknown): unknown {
   if (!isRecord(value)) return value
   const model: Record<string, unknown> = {
@@ -27,7 +27,7 @@ function normalizeCompiledValue(value: unknown): unknown {
             ? {
                 ...requirement,
                 status: requirement.status ?? 'partial',
-                reason: requirement.reason ?? '待支撑评估',
+                reason: requirement.reason ?? '待业务审阅',
                 evidence: requirement.evidence ?? [],
               }
             : requirement,
@@ -52,9 +52,9 @@ export function validateCompiledModel(raw: string): CandidateModel {
     for (const requirement of activity.requirements) {
       if (
         requirement.status !== 'partial' ||
-        requirement.reason !== '待支撑评估'
+        requirement.reason !== '待业务审阅'
       )
-        throw new Error('模型整理阶段不能代替支撑评估。')
+        throw new Error('模型编译阶段不会判断业务是否已表达。')
     }
   return candidate
 }

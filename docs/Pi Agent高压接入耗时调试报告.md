@@ -1,5 +1,7 @@
 # Pi Agent 高压接入文档耗时调试报告
 
+> 本文为旧链路的耗时诊断归档，记录的工具交接、独立核对和阶段超时不代表当前实现。当前流程见 [语义交接规范](semantic-handoff.md)。
+
 ## 结论
 
 使用 `高压接入方案业务规则说明1.docx` 做了真实运行。当前 `.env` 使用 `glm-5.3-flash`、Coding Plan endpoint、`GLM_REASONING_EFFORT=max`、`GLM_MAX_OUTPUT_TOKENS=32768`，Pi 阶段默认总时限为 300 秒。
@@ -65,7 +67,7 @@
 
 ### 2. 业务理解天然包含多个串行模型回合
 
-`server/agents/pi-understanding.ts` 的正常路径至少包含：初次生成、独立检查、根据检查修正、第二次独立检查、最终工具交接。独立检查在 `check_understanding` 工具内部再次调用 `reviewUnderstanding`，所以一次工具调用实际上包含另一个完整的 GLM 请求。
+旧版 `server/agents/pi-understanding.ts` 的正常路径至少包含：初次生成、独立检查、根据检查修正、第二次独立检查、最终工具交接。独立检查在 `check_understanding` 工具内部再次调用 `reviewUnderstanding`，所以一次工具调用实际上包含另一个完整的 GLM 请求；当前 Pi 流程已移除这条路径。
 
 代码允许最多 8 个 Agent turn；独立检查虽然限制为两次，但第二次检查后只是把“请立即提交”返回给模型，仍需要额外模型回合调用 `finish_understanding`。当前 low 记录正是在第 5 个请求交接时被总时限中止。
 

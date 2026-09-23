@@ -1,7 +1,4 @@
 import type { CandidateModel, Evidence } from './model.ts'
-import type { ExpressionReview } from './expression.ts'
-import type { SemanticPlanV2 } from './semantic.ts'
-import type { UnderstandingReview } from './workflow.ts'
 import type { DesignReview } from './design-review.ts'
 import type { ReasoningEffort } from './reasoning.ts'
 
@@ -13,7 +10,7 @@ export interface Question {
   text: string
   options: string[]
   multiple?: boolean
-  clarification?: ClarificationReason & { source: 'model' | 'assess' }
+  clarification?: ClarificationReason & { source: 'model' }
 }
 export interface ClarificationReason {
   basis: string
@@ -26,23 +23,6 @@ export interface BusinessClarification extends ClarificationReason {
   text: string
   options: string[]
   multiple: boolean
-}
-export interface Understanding {
-  narrative: string
-  questions: Question[]
-  warnings: string[]
-  sources?: UnderstandingSources
-  review?: UnderstandingReview
-}
-export interface UnderstandingSources {
-  documentName: string
-  // Original block snapshots: quotes are copied by the program, never by the LLM.
-  blocks: BusinessDocument['blocks']
-  citations: {
-    passage: string
-    origin: 'document' | 'user'
-    blockIds: string[]
-  }[]
 }
 export type SupportStatus = 'supported' | 'partial' | 'missing'
 export interface RequirementAssessment {
@@ -69,6 +49,22 @@ export interface Assessment {
   clarifications: BusinessClarification[]
   historicalQuestions?: string[]
 }
+export interface Understanding {
+  narrative: string
+  questions: Question[]
+  warnings: string[]
+  sources?: UnderstandingSources
+}
+export interface UnderstandingSources {
+  documentName: string
+  // Original block snapshots: quotes are copied by the program, never by the LLM.
+  blocks: BusinessDocument['blocks']
+  citations: {
+    passage: string
+    origin: 'document' | 'user'
+    blockIds: string[]
+  }[]
+}
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -85,18 +81,15 @@ export interface ModelingInput {
   narrative: string
   currentModel?: unknown
   feedback?: string
-  understandingReview?: UnderstandingReview
 }
 export interface ModelingResult {
-  semanticPlan: string
+  modelDesign: string
   designReview?: DesignReview
   businessBasis?: string
-  semantic?: SemanticPlanV2
   clarifications: BusinessClarification[]
   model: CandidateModel
-  expressionReview: ExpressionReview
-  // Direct element evidence stays empty; paragraph provenance is retained in
-  // the understanding and the workspace's saved modeling basis.
+  // The current compiler does not invent element-level citations. Source
+  // snapshots remain attached to the business understanding and saved basis.
   provenance: { basis: 'business-understanding'; evidence: 'unlinked' }
   validation: { elements: number; warnings: string[] }
 }
@@ -107,12 +100,6 @@ export const PROVIDERS: Record<ProviderId, { name: string; label: string }> = {
   gpt: { name: 'GPT', label: 'GPT API' },
   qwen: { name: 'Qwen', label: 'Qwen API' },
   glm: { name: 'GLM', label: 'GLM API' },
-}
-export type AgentRuntimeId = 'direct' | 'pi'
-export const DEFAULT_RUNTIME: AgentRuntimeId = 'pi'
-export const RUNTIMES: Record<AgentRuntimeId, { name: string; label: string }> = {
-  direct: { name: '直接调用', label: '直接调用模型' },
-  pi: { name: 'Pi Agent', label: 'Pi Agent' },
 }
 export interface TurnTiming {
   callId: string
@@ -134,41 +121,31 @@ export type ProviderEvent =
   | { type: 'delta'; text: string; reasoning?: boolean; size?: number }
   | { type: 'timing'; timing: TurnTiming }
 export type StagePart =
-  'reading' | 'basis' | 'semantic' | 'design-check' | 'compile' | 'expression' | 'repair' | 'recheck' | 'mapping'
+  'reading' | 'basis' | 'design' | 'design-check' | 'compile' | 'narrate' | 'assess'
 export type StageEvent =
   | (ProviderEvent & { part?: StagePart })
   | {
-      type: 'model-checkpoint'
-      model: CandidateModel
-      expressionReview: ExpressionReview
-    }
-  | {
-      type: 'model-plan'
-      part: 'semantic'
-      semanticPlan: string
+      type: 'model-design'
+      part: 'design'
+      modelDesign: string
       clarifications: BusinessClarification[]
       warnings: string[]
     }
   | { type: 'business-basis'; part: 'basis'; text: string }
-  | { type: 'design-review'; part: 'semantic'; review: DesignReview; semanticPlan?: string }
-  | { type: 'semantic-plan'; part: 'semantic'; semantic: SemanticPlanV2 }
+  | { type: 'design-review'; part: 'design'; review: DesignReview; modelDesign?: string }
   | ({ type: 'understanding-narrative' } & Understanding)
-  | { type: 'understanding-review'; review: UnderstandingReview }
-export type AnalysisRequest = { provider: ProviderId; runtime?: AgentRuntimeId; reasoningEffort?: ReasoningEffort } & (
+export type AnalysisRequest = { provider: ProviderId; reasoningEffort?: ReasoningEffort } & (
   | { stage: 'understand'; document: BusinessDocument }
-  | { stage: 'model'; narrative: string; model?: unknown; instruction?: string; understandingReview?: UnderstandingReview }
+  | { stage: 'model'; narrative: string; model?: unknown; instruction?: string }
   | {
       stage: 'compile'
-      semanticPlan: string
+      modelDesign: string
       businessBasis?: string
       designReview?: DesignReview
       narrative: string
-      semantic?: SemanticPlanV2
     }
   | { stage: 'narrate'; model: CandidateModel }
   | { stage: 'assess'; model: CandidateModel }
-  | { stage: 'verify'; narrative: string; result: ModelingResult }
-  | { stage: 'map'; narrative: string; result: ModelingResult }
 )
 export interface DiscussionRequest {
   provider: ProviderId
@@ -183,8 +160,6 @@ export interface AnalysisResults {
   compile: ModelingResult
   narrate: { narrative: string }
   assess: { assessment: Assessment }
-  verify: ModelingResult
-  map: ModelingResult
 }
 export type AnalysisResult = AnalysisResults[keyof AnalysisResults]
 export type AnalysisEvent =

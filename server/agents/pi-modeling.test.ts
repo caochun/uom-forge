@@ -1,7 +1,9 @@
 import test, { type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import { runPiModeling } from './pi-modeling.ts'
-import { runPiUnderstanding } from './pi-understanding.ts'
+import { runPiText } from './pi-text.ts'
+import { understandingPrompt } from '../stages/prompts.ts'
+import { designVerdict } from '../stages/design-review.ts'
 import type { StageEvent } from '../../shared/analysis.ts'
 import { reviewModelClarifications } from '../../shared/clarifications.ts'
 import { artifactVersion } from '../../shared/workflow.ts'
@@ -29,6 +31,14 @@ function configure(t: TestContext) {
   })
 }
 const noTurn = async () => { throw new Error('must not call') }
+
+test('design review recognizes common Chinese revision conclusions', () => {
+  assert.equal(designVerdict('结论：可表达\n已能表达该情形。'), 'sufficient')
+  assert.equal(designVerdict('结论：需要修改\n运行状态没有明确归属。'), 'revise')
+  assert.equal(designVerdict('结论：存在缺口\n多个实例无法区分。'), 'revise')
+  assert.equal(designVerdict('结论：需业务澄清\n边界影响模型选择。'), 'clarify')
+  assert.equal(designVerdict('这份设计可能还需要补充前提。'), 'unknown')
+})
 
 test('Pi tool loop checks, revises and replays feedback, then exits without a finish turn', async t => {
   configure(t)
@@ -58,7 +68,7 @@ test('Pi tool loop checks, revises and replays feedback, then exits without a fi
     options.onEvent?.({ type: 'delta', text: checks === 1 ? defect : passed })
     return checks === 1 ? defect : passed
   }, { provider: 'glm', onEvent: event => events.push(event) }, prepared)
-  assert.equal(result.semanticPlan, revised)
+  assert.equal(result.modelDesign, revised)
   assert.equal(result.designReview.status, 'completed')
   assert.equal(result.designReview.rounds.length, 2)
   assert.equal(result.designReview.businessBasisVersion, artifactVersion(prepared))
@@ -71,9 +81,9 @@ test('Pi tool loop checks, revises and replays feedback, then exits without a fi
   assert.equal(requests.length, 2)
   assert.equal(checks, 2)
   assert.ok(events.some(event => event.type === 'delta' && event.part === 'design-check' && event.text === defect))
-  const checkpoints = events.filter(event => event.type === 'design-review' && event.semanticPlan)
-  assert.ok(checkpoints.some(event => event.type === 'design-review' && event.semanticPlan === initial))
-  assert.ok(checkpoints.some(event => event.type === 'design-review' && event.semanticPlan === revised))
+  const checkpoints = events.filter(event => event.type === 'design-review' && event.modelDesign)
+  assert.ok(checkpoints.some(event => event.type === 'design-review' && event.modelDesign === initial))
+  assert.ok(checkpoints.some(event => event.type === 'design-review' && event.modelDesign === revised))
   assert.equal(checkpoints[0].type === 'design-review' && checkpoints[0].review.rounds.length, 0, 'events are snapshots, not mutable aliases')
 })
 
@@ -99,10 +109,10 @@ test('flexible headings and grounded questions are retained without format repai
   const draft = `## 我的设计\n${revised}\n\n## 需要补充的业务信息\n1. 审核通过后是否需要复核？\n依据：“业务事实：审核通过是办理前提。”\n歧义：通过即办理，或仍需复核。\n影响：改变办理前提。\n选项：立即办理；先复核`
   t.mock.method(globalThis, 'fetch', async () => { calls++; return stream(draft, true) })
   const result = await runPiModeling({ narrative }, async () => '结论：业务待澄清\n是否复核需由业务确认；不能自行增加复核规则。', { provider: 'glm' }, prepared)
-  assert.equal(result.semanticPlan, draft)
+  assert.equal(result.modelDesign, draft)
   assert.equal(calls, 1)
   assert.equal(result.designReview.reason, 'clarify')
-  assert.equal(reviewModelClarifications(result.semanticPlan, narrative, prepared).clarifications[0].basisSource, 'business-basis')
+  assert.equal(reviewModelClarifications(result.modelDesign, narrative, prepared).clarifications[0].basisSource, 'business-basis')
 })
 
 test('unrecognized review text is preserved for people without regeneration or a false pass', async t => {
@@ -115,7 +125,7 @@ test('unrecognized review text is preserved for people without regeneration or a
   assert.equal(result.designReview.rounds[0].feedback, '这份设计可能还需要补充前提。')
 })
 
-test('semantic revisions stop at three rounds and retain the latest complete design', async t => {
+test('design revisions stop at three rounds and retain the latest complete design', async t => {
   configure(t)
   let calls = 0
   t.mock.method(globalThis, 'fetch', async () => stream(`${initial}\n修订 ${++calls}`, true))
@@ -123,7 +133,7 @@ test('semantic revisions stop at three rounds and retain the latest complete des
   assert.equal(calls, 3)
   assert.equal(result.designReview.reason, 'limit')
   assert.equal(result.designReview.rounds.length, 3)
-  assert.match(result.semanticPlan, /修订 3/)
+  assert.match(result.modelDesign, /修订 3/)
 })
 
 test('an unchanged design stops without paying for the same review again', async t => {
@@ -141,7 +151,7 @@ test('review service failure retains the design and does not block compilation',
   configure(t)
   t.mock.method(globalThis, 'fetch', async () => stream(initial, true))
   const result = await runPiModeling({ narrative }, noTurn, { provider: 'glm' }, prepared)
-  assert.equal(result.semanticPlan, initial)
+  assert.equal(result.modelDesign, initial)
   assert.equal(result.designReview.reason, 'unavailable')
 })
 
@@ -150,7 +160,7 @@ test('a truncated revision cannot replace the last complete design', async t => 
   let calls = 0
   t.mock.method(globalThis, 'fetch', async () => ++calls === 1 ? stream(initial, true) : stream('半份设计', false, 'length'))
   const result = await runPiModeling({ narrative }, async () => defect, { provider: 'glm' }, prepared)
-  assert.equal(result.semanticPlan, initial)
+  assert.equal(result.modelDesign, initial)
   assert.equal(calls, 2)
   assert.equal(result.designReview.status, 'attention')
 })
@@ -165,7 +175,7 @@ test('cancellation in the reviewer stops the loop but publishes the complete dra
     options.signal?.throwIfAborted()
     return passed
   }, { provider: 'glm', signal: controller.signal, onEvent: event => events.push(event) }, prepared), /cancelled/)
-  assert.ok(events.some(event => event.type === 'design-review' && event.semanticPlan === initial))
+  assert.ok(events.some(event => event.type === 'design-review' && event.modelDesign === initial))
 })
 
 test('cancelled modeling does not start a request', async t => {
@@ -181,6 +191,6 @@ test('Pi understanding remains one flexible text generation without reviewer or 
   const draft = '可以多次登记。 [[source:B1]]'
   let calls = 0
   t.mock.method(globalThis, 'fetch', async () => { calls++; return stream(draft) })
-  assert.equal(await runPiUnderstanding({ name: 'test', blocks: [{ id: 'B1', text: '可以多次登记。' }] }, 'glm', noTurn), draft)
+  assert.equal(await runPiText(understandingPrompt({ name: 'test', blocks: [{ id: 'B1', text: '可以多次登记。' }] }), 'reading', { provider: 'glm' }), draft)
   assert.equal(calls, 1)
 })

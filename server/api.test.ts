@@ -5,9 +5,10 @@ import { once } from 'node:events'
 import { createApiMiddleware } from './api.ts'
 import type { RunTurn } from './providers/types.ts'
 import type { AnalysisEvent } from '../shared/analysis.ts'
+import { testAgents } from './testing/agents.ts'
 
-async function serve(runTurn: RunTurn) {
-  const middleware = createApiMiddleware(runTurn)
+async function serve(runTurn: RunTurn, agents = testAgents(runTurn)) {
+  const middleware = createApiMiddleware(runTurn, agents)
   const server = createServer((request, response) => {
     void middleware(request, response, () => {
       response.statusCode = 404

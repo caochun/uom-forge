@@ -12,6 +12,7 @@ import { understandingPrompt } from '../server/stages/prompts.ts'
 import { validateDocument } from '../server/validation/document.ts'
 import { errorMessage, isRecord } from '../server/validation/values.ts'
 import type { StageEvent, TurnTiming } from '../shared/analysis.ts'
+import { scopedTurn } from '../server/stages/contracts.ts'
 
 // The input document and experiment artifacts stay outside the application.
 // This runs the actual first stage with identical input and isolated sessions.
@@ -107,8 +108,11 @@ try {
         `${name}: starting ${metadata.model}, ${metadata.promptCharacters} prompt characters`,
       )
       try {
-        const result = await readBusiness(document, provider, {
+        const result = await readBusiness(document, {
           signal: controller.signal,
+          agents: {
+            text: (value, _part, options) => provider(value, scopedTurn(options, 'reading')),
+          },
           onEvent(event) {
             const observedMs = Math.round(performance.now() - started)
             events.push({ ...event, observedMs })

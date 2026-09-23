@@ -6,7 +6,8 @@ import type { ProviderEvent } from '../../shared/analysis.ts'
 import { createGlmProvider } from './glm.ts'
 import { createPiModel, createPiStream } from './pi.ts'
 import { resolveProvider } from './index.ts'
-import { runPiUnderstanding } from '../agents/pi-understanding.ts'
+import { runPiText } from '../agents/pi-text.ts'
+import { understandingPrompt } from '../stages/prompts.ts'
 
 const frame = (delta: unknown, finish_reason: string | null = null) =>
   `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\n\n`
@@ -165,11 +166,10 @@ test('GLM understanding reports upstream quota errors instead of retrying tool h
     })
   })
   await assert.rejects(
-    runPiUnderstanding(
-      { name: 'test', blocks: [{ id: '1', text: '工作人员分配车辆。' }] },
-      'glm',
-      async () => { throw new Error('critic must not run') },
-      { provider: 'glm', runtime: 'pi' },
+    runPiText(
+      understandingPrompt({ name: 'test', blocks: [{ id: '1', text: '工作人员分配车辆。' }] }),
+      'reading',
+      { provider: 'glm' },
     ),
     (error: Error) => {
       assert.match(error.message, /GLM.*1113/)
@@ -206,11 +206,10 @@ test('Pi understanding returns text without automatic review or a finish tool ha
     request = JSON.parse(String(init?.body))
     return new Response(frame({ content: narrative }, 'stop') + done, { headers: { 'content-type': 'text/event-stream' } })
   })
-  const result = await runPiUnderstanding(
-    { name: 'test', blocks: [{ id: '1', text: '业务事实。' }] },
-    'glm',
-    async () => { throw new Error('must not run a reviewer') },
-    { provider: 'glm', runtime: 'pi' },
+  const result = await runPiText(
+    understandingPrompt({ name: 'test', blocks: [{ id: '1', text: '业务事实。' }] }),
+    'reading',
+    { provider: 'glm' },
   )
   assert.equal(result, narrative)
   assert.equal(request.tools, undefined)

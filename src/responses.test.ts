@@ -10,7 +10,7 @@ import {
 import type { AnalysisEvent, DiscussionEvent } from '../shared/analysis.ts'
 
 test('design checkpoints accept free text and reject broken metadata without imposing document headings', () => {
-  const value = { type: 'design-review', part: 'semantic', semanticPlan: '任意文本。', review: {
+  const value = { type: 'design-review', part: 'design', modelDesign: '任意文本。', review: {
     status: 'checking', round: 1, rounds: [],
   } }
   assert.deepEqual(parseAnalysisEvent(value), value)
@@ -19,7 +19,7 @@ test('design checkpoints accept free text and reject broken metadata without imp
 
 test('frontend consumes typed SSE split inside UTF-8 and detects a mismatched stage result', async () => {
   const data =
-    'data: {"type":"delta","text":"业务说明"}\n\ndata: {"type":"result","result":{"narrative":"模型自述"}}'
+    'data: {"type":"delta","text":"业务说明"}\n\ndata: {"type":"result","result":{"narrative":"模型说明"}}'
   const bytes = new TextEncoder().encode(data)
   const response = new Response(
     new ReadableStream({
@@ -35,19 +35,8 @@ test('frontend consumes typed SSE split inside UTF-8 and detects a mismatched st
   assert.deepEqual(events[0], { type: 'delta', text: '业务说明' })
   const last = events.at(-1)
   assert.ok(last?.type === 'result')
-  assert.equal(isStageResult('narrate', last.result), true)
+  assert.equal(isStageResult('model', last.result), false)
   assert.equal(isStageResult('understand', last.result), false)
-})
-
-test('semantic plan events pass through the SSE boundary', () => {
-  const semantic = { schemaVersion: '2', status: 'facts', facts: [], stories: [], mappings: [], boundaries: [], clarifications: [] }
-  const event = parseAnalysisEvent({ type: 'semantic-plan', part: 'semantic', semantic })
-  assert.deepEqual(event, { type: 'semantic-plan', part: 'semantic', semantic })
-  assert.throws(() => parseAnalysisEvent({ type: 'semantic-plan', part: 'compile', semantic }), /无效事件/)
-  assert.throws(
-    () => parseAnalysisEvent({ type: 'semantic-plan', part: 'semantic', semantic: { ...semantic, facts: 'invalid' } }),
-    /语义计划结构无效/,
-  )
 })
 
 test('frontend consumes discussion SSE deltas and reasoning', async () => {

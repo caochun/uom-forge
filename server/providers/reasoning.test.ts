@@ -53,18 +53,18 @@ function checkParameters(body: Record<string, any>, provider: ProviderId, effort
   }
 }
 
-test('every selectable effort reaches Pi and direct requests unchanged, independently of environment and SDK defaults', async () => {
+test('every selectable effort reaches Pi and the provider interface unchanged, independently of environment and SDK defaults', async () => {
   const factories = { glm: createGlmProvider, gpt: createGptProvider, deepseek: createDeepSeekProvider, qwen: createQwenProvider }
   const before = { ...env }
   for (const provider of Object.keys(factories) as ProviderId[]) {
-    // Run different selections concurrently through the same direct provider.
-    const direct = factories[provider](async (_url, init) => {
+    // Run different selections concurrently through the same provider factory.
+    const providerTurn = factories[provider](async (_url, init) => {
       const body = JSON.parse(String(init?.body))
       checkParameters(body, provider, body.messages[0].content)
       return response()
     }, env)
     await Promise.all(publicModelOptions(env)[provider].efforts.map(async effort => {
-      await direct(effort, { reasoningEffort: effort })
+      await providerTurn(effort, { reasoningEffort: effort })
       let sent = false
       const stream = createPiStream(provider, () => false, env, effort)
       const result = await stream(createPiModel(provider, env, effort), {

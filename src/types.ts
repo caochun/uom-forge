@@ -9,8 +9,6 @@ import type {
 } from '../shared/analysis.ts'
 import type { CandidateModel, Element } from '../shared/model.ts'
 import type { Revisions } from './workspace.ts'
-import type { ExpressionReview } from '../shared/expression.ts'
-import type { SemanticPlanV2 } from '../shared/semantic.ts'
 import type { DesignReview } from '../shared/design-review.ts'
 
 export type AnalysisStage = AnalysisRequest['stage']
@@ -48,11 +46,11 @@ export interface CompilationOutput {
   callId?: string
   status: 'streaming' | 'completed' | 'interrupted'
 }
-export interface SemanticPlan {
+export interface ModelDesign {
   plan: string
   designReview?: DesignReview
   designDraft?: string
-  // Display-only streams from the current design iteration and its expression check.
+  // Display-only streams from the current design iteration.
   designReasoning?: string
   designCheckReasoning?: string
   compilation?: CompilationOutput
@@ -60,16 +58,9 @@ export interface SemanticPlan {
   // Display-only stream, kept separately from the basis sent to later stages.
   businessBasisReasoning?: string
   businessBasisComplete?: boolean
-  // Display-only reasoning from the semantic preparation handoff. The raw
-  // JSON is intentionally kept out of the user-facing transcript; the
-  // validated snapshots remain the source of truth for facts, stories and
-  // mappings.
-  semanticReasoning?: string
-  semanticReasoningPart?: 'facts' | 'stories' | 'mapping'
-  // Preserve the document reading used to derive this run's businessBasis, including source
-  // snapshots; later edits must not rewrite an old fact's provenance.
+  // Preserve the document reading used to derive this run's businessBasis,
+  // including source snapshots; later edits must not rewrite the saved basis.
   basis?: Pick<Understanding, 'narrative' | 'sources'>
-  semantic?: SemanticPlanV2
   complete: boolean
   compiled: boolean
   warnings?: string[]
@@ -79,8 +70,6 @@ export interface CandidateDraft {
   revision: number
   documentRevision: number
   edited?: boolean
-  expressionReview?: ExpressionReview
-  historicalQuestions?: string[]
 }
 export interface WorkspaceMessage extends ChatMessage {
   id?: string
@@ -97,10 +86,10 @@ export interface Project {
   questionsSaved: boolean
   feedback: string
   feedbackDocumentRevision: number | null
-  plan: SemanticPlan | null
+  plan: ModelDesign | null
   candidate: CandidateDraft | null
-  narration: string
-  assessment: Assessment | null
+  narration?: string
+  assessment?: Assessment | null
   outputs: Partial<Record<AnalysisStage, string>>
   timings: Partial<Record<AnalysisStage, StageTiming[]>>
   revisions: Revisions

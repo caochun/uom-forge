@@ -11,6 +11,7 @@ import type { StageOptions } from '../server/stages/contracts.ts'
 import { errorMessage, isRecord } from '../server/validation/values.ts'
 import { validateDocument } from '../server/validation/document.ts'
 import { understandingPrompt } from '../server/stages/prompts.ts'
+import { runPiText } from '../server/agents/pi-text.ts'
 
 // Evaluation input is supplied externally; no domain documents or expected
 // concepts belong in Forge's prompts or application bundle.
@@ -109,7 +110,10 @@ console.log(`Comparing ${values.provider} prompts; results in ${values.output}`)
 const results = await Promise.allSettled([
   run('baseline', (options) => runProviderTurn(baselinePrompt, options)),
   run('candidate', (options) =>
-    readBusiness(document, runProviderTurn, options),
+    readBusiness(document, {
+      ...options,
+      agents: { text: (prompt, part, stageOptions) => runPiText(prompt, part, stageOptions) },
+    }),
   ),
 ])
 if (results.some((result) => result.status === 'rejected')) process.exitCode = 1

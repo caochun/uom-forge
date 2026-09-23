@@ -1,11 +1,10 @@
-import { readUnderstandingReview, readLineage } from '../shared/workflow.ts'
 import type {
   Assessment,
+  BusinessClarification,
   Question,
   SupportStatus,
   TurnTiming,
   Understanding,
-  BusinessClarification,
 } from '../shared/analysis.ts'
 import type {
   CandidateModel,
@@ -13,22 +12,18 @@ import type {
   Property,
   Requirement,
 } from '../shared/model.ts'
-import type { Project, SemanticPlan } from './types.ts'
+import type { Project, ModelDesign } from './types.ts'
 import { isRecord, number, record, records, strings, text } from './values.ts'
 import { reviseUnderstanding } from './understanding.ts'
-import type { ExpressionCase, ExpressionReview } from '../shared/expression.ts'
-import {
-  EXPRESSION_STATUS,
-  interruptReview,
-  STAGE_PART_LABELS,
-} from '../shared/expression.ts'
 import type { StagePart } from '../shared/analysis.ts'
-import type { SemanticPlanV2 } from '../shared/semantic.ts'
-import { validateSemanticPlan } from '../shared/semantic-validation.ts'
 import { readUnderstandingSources } from '../shared/understanding-sources.ts'
 import { readDesignReview, interruptDesignReview } from '../shared/design-review.ts'
 
-const stages = ['understand', 'model', 'compile', 'verify', 'map', 'narrate', 'assess'] as const
+const stages = ['understand', 'model', 'compile', 'narrate', 'assess'] as const
+const STAGE_PART_LABELS: Record<string, string> = {
+  reading: '业务理解', basis: '业务依据', design: '模型设计',
+  'design-check': '设计检查', compile: '模型编译', narrate: '模型自述', assess: '业务过程支撑',
+}
 const evidence = (value: unknown): Evidence[] =>
   records(value).map((item) => ({ quote: text(item.quote) }))
 const element = (item: Record<string, unknown>) => ({
@@ -59,14 +54,13 @@ function properties(value: unknown): Property[] {
     }
   })
 }
-// Old drafts can lack optional UI fields and predate the current layout. Decode
-// at the storage boundary, retaining original extra fields rather than treating
-// every JSON value as an already typed Project or discarding the user's draft.
+// Decode the current draft schema at the storage boundary. Unsupported schemas
+// are discarded instead of being interpreted as one of the removed workflows.
 function readModel(value: unknown): CandidateModel | null {
   if (!isRecord(value) || !Array.isArray(value.objects)) return null
-  const { questions: _questions, ...semantic } = value
+  const { questions: _questions, ...modelData } = value
   return {
-    ...semantic,
+    ...modelData,
     schemaVersion: '1',
     name: text(value.name, '已有候选模型'),
     summary: text(value.summary),
@@ -136,14 +130,9 @@ function readUnderstanding(value: unknown): Understanding | null {
             multiple: question.multiple === true,
             clarification:
               isRecord(question.clarification) &&
-              ['model', 'assess'].includes(
-                String(question.clarification.source),
-              )
+              question.clarification.source === 'model'
                 ? {
-                    source:
-                      question.clarification.source === 'model'
-                        ? 'model'
-                        : 'assess',
+                    source: 'model',
                     basis: text(question.clarification.basis),
                     ...(question.clarification.basisSource === 'business-basis' ? { basisSource: 'business-basis' as const } : {}),
                     ambiguity: text(question.clarification.ambiguity),
@@ -160,74 +149,39 @@ function readUnderstanding(value: unknown): Understanding | null {
     questions,
     warnings: strings(value.warnings),
     sources: readUnderstandingSources(value.sources, text(value.narrative)),
-    review: safeUnderstandingReview(value.review),
   }
-}
-function safeUnderstandingReview(value: unknown) {
-  try { return readUnderstandingReview(value) } catch { return undefined }
 }
 function readAssessment(value: unknown): Assessment | null {
   if (!isRecord(value)) return null
-  const { questions: _questions, ...assessment } = value
-  const status = (value: unknown): SupportStatus =>
-    value === 'supported' || value === 'missing' ? value : 'partial'
+  const status = (candidate: unknown): SupportStatus =>
+    candidate === 'supported' || candidate === 'missing' ? candidate : 'partial'
   return {
-    ...assessment,
     summary: text(value.summary),
     recommendations: strings(value.recommendations),
-    clarifications: records(value.clarifications).map(
-      (item): BusinessClarification => ({
-        text: text(item.text),
-        basis: text(item.basis),
-        ambiguity: text(item.ambiguity),
-        impact: text(item.impact),
-        options: strings(item.options),
-        multiple: item.multiple === true,
-      }),
-    ),
-    historicalQuestions: [
-      ...new Set([
-        ...strings(value.historicalQuestions),
-        ...strings(value.questions),
-      ]),
-    ],
+    clarifications: records(value.clarifications).map((item): BusinessClarification => ({
+      text: text(item.text), basis: text(item.basis), ambiguity: text(item.ambiguity),
+      impact: text(item.impact), options: strings(item.options), multiple: item.multiple === true,
+    })),
     processAssessments: records(value.processAssessments).map((item) => ({
-      ...item,
-      processId: text(item.processId),
-      processName: text(item.processName),
-      status: status(item.status),
-      // Preserve old conclusions, but never invent a requirement/element mapping.
-      reason: text(item.reason, strings(item.gaps).join('；')),
+      processId: text(item.processId), processName: text(item.processName),
+      status: status(item.status), reason: text(item.reason),
+      evidence: evidence(item.evidence),
       requirements: records(item.requirements).map((requirement) => ({
-        ...requirement,
-        requirement: text(requirement.requirement),
-        status: status(requirement.status),
-        elements: strings(requirement.elements),
-        explanation: text(requirement.explanation),
-        gap: text(requirement.gap),
-        suggestion: text(requirement.suggestion),
+        requirement: text(requirement.requirement), status: status(requirement.status),
+        elements: strings(requirement.elements), explanation: text(requirement.explanation),
+        gap: text(requirement.gap), suggestion: text(requirement.suggestion),
         evidence: evidence(requirement.evidence),
       })),
-      evidence: evidence(item.evidence),
     })),
   }
 }
-function readPlan(value: unknown): SemanticPlan | null {
+function readPlan(value: unknown): ModelDesign | null {
   if (!isRecord(value)) return null
-  const { semantic: storedSemantic, basis: storedBasis, businessBasis: storedBusinessBasis, businessBasisComplete: storedBasisComplete,
+  const { basis: storedBasis, businessBasis: storedBusinessBasis, businessBasisComplete: storedBasisComplete,
     businessBasisReasoning: storedBasisReasoning,
-    semanticReasoning: storedSemanticReasoning, semanticReasoningPart: storedSemanticReasoningPart,
     designReview: storedReview, designDraft: storedDraft, designReasoning: storedDesignReasoning,
     designCheckReasoning: storedDesignCheckReasoning, compilation: storedCompilation, ...rest } = value
   const designReview = interruptDesignReview(readDesignReview(storedReview))
-  let semantic: SemanticPlanV2 | undefined
-  if (isRecord(storedSemantic)) {
-    try {
-      semantic = validateSemanticPlan(storedSemantic as unknown as SemanticPlanV2)
-    } catch {
-      semantic = undefined
-    }
-  }
   return {
     ...rest,
     plan: text(value.plan),
@@ -244,87 +198,13 @@ function readPlan(value: unknown): SemanticPlan | null {
     } : {}),
     ...(typeof storedBusinessBasis === 'string' ? { businessBasis: storedBusinessBasis, businessBasisComplete: storedBasisComplete === true } : {}),
     ...(typeof storedBasisReasoning === 'string' ? { businessBasisReasoning: storedBasisReasoning } : {}),
-    ...(typeof storedSemanticReasoning === 'string' ? { semanticReasoning: storedSemanticReasoning } : {}),
-    ...(storedSemanticReasoningPart === 'facts' || storedSemanticReasoningPart === 'stories' || storedSemanticReasoningPart === 'mapping'
-      ? { semanticReasoningPart: storedSemanticReasoningPart } : {}),
     complete: value.complete === true,
     compiled: value.compiled === true,
     warnings: strings(value.warnings),
     ...(isRecord(storedBasis) && typeof storedBasis.narrative === 'string'
       ? { basis: { narrative: storedBasis.narrative, sources: readUnderstandingSources(storedBasis.sources, storedBasis.narrative) } }
       : {}),
-    ...(semantic ? { semantic } : {}),
   }
-}
-function readExpressionReview(value: unknown): ExpressionReview | undefined {
-  if (
-    !isRecord(value) ||
-    typeof value.status !== 'string' ||
-    !(value.status in EXPRESSION_STATUS)
-  )
-    return undefined
-  const snapshots: ExpressionReview['snapshots'] = records(
-    value.snapshots,
-  ).flatMap((snapshot) => {
-    const model = readModel(snapshot.model)
-    if (!model) return []
-    const check =
-      isRecord(snapshot.check) && Array.isArray(snapshot.check.cases)
-        ? {
-            summary: text(snapshot.check.summary),
-            warnings: strings(snapshot.check.warnings),
-            cases: records(snapshot.check.cases).map(
-              (item): ExpressionCase => ({
-                id: text(item.id),
-                fact: text(item.fact),
-                basis: text(item.basis),
-                scenario: text(item.scenario),
-                status:
-                  item.status === 'expressed' || item.status === 'defect'
-                    ? item.status
-                    : 'uncertain',
-                elements: strings(item.elements),
-                explanation: text(item.explanation),
-                gap: text(item.gap),
-                suggestion: text(item.suggestion),
-                factIds: strings(item.factIds),
-                repairTarget: item.repairTarget === 'understanding' || item.repairTarget === 'clarification' ? item.repairTarget : 'model',
-              }),
-            ),
-            clarifications: records(snapshot.check.clarifications).map(
-              (item): BusinessClarification => ({
-                text: text(item.text),
-                basis: text(item.basis),
-                ambiguity: text(item.ambiguity),
-                impact: text(item.impact),
-                options: strings(item.options),
-                multiple: item.multiple === true,
-              }),
-            ),
-          }
-        : undefined
-    return [{ model, check }]
-  })
-  if (!snapshots.length) return undefined
-  return interruptReview({
-    status: value.status as ExpressionReview['status'],
-    lineage: readLineage(value.lineage),
-    snapshots,
-    selectedSnapshot:
-      Number.isInteger(value.selectedSnapshot) &&
-      number(value.selectedSnapshot) >= 0 &&
-      number(value.selectedSnapshot) < snapshots.length
-        ? number(value.selectedSnapshot)
-        : snapshots.length - 1,
-    changes: records(value.changes).map((change) => ({
-      collection: text(change.collection),
-      id: text(change.id),
-      value: change.value,
-      caseIds: strings(change.caseIds),
-      reason: text(change.reason),
-    })),
-    warnings: strings(value.warnings),
-  })
 }
 function readTimings(value: unknown): Project['timings'] {
   const source = record(value)
@@ -376,33 +256,16 @@ function readTimings(value: unknown): Project['timings'] {
   return result
 }
 export function restoreProject(value: unknown, empty: Project): Project {
-  if (!isRecord(value)) return empty
-  const current = value.version === 4
+  if (!isRecord(value) || value.version !== 4) return empty
   const candidate = record(value.candidate)
-  const model = current
-    ? readModel(candidate.model)
-    : records(value.objects).length
-      ? readModel({
-          ...value,
-          actions: records(value.capabilities).filter(
-            (item) => item.kind === '操作',
-          ),
-          functions: records(value.capabilities).filter(
-            (item) => item.kind === '只读能力',
-          ),
-        })
-      : null
+  const model = readModel(candidate.model)
   const savedUnderstanding = record(value.understanding)
-  const reading =
-    readUnderstanding(savedUnderstanding.source) ||
-    readUnderstanding(value.understanding)
-  const plan = readPlan(current ? value.plan : value.modelingState)
+  const reading = readUnderstanding(savedUnderstanding.source) || readUnderstanding(value.understanding)
+  const plan = readPlan(value.plan)
   const revision = record(value.revisions)
   const document = record(value.document)
   const answers: Project['answers'] = {}
-  for (const [key, answer] of Object.entries(
-    record(current ? value.answers : value.questionAnswers),
-  )) {
+  for (const [key, answer] of Object.entries(record(value.answers))) {
     if (!/^\d+$/.test(key)) continue
     if (typeof answer === 'string') answers[Number(key)] = answer
     else if (Array.isArray(answer)) answers[Number(key)] = strings(answer)
@@ -435,32 +298,18 @@ export function restoreProject(value: unknown, empty: Project): Project {
       : typeof value === 'number' && Number.isFinite(value)
         ? value
         : fallback
-  const revisions = current
-    ? {
-        document: number(revision.document),
-        business: number(revision.business),
-        understoodDocument: nullableNumber(revision.understoodDocument, null),
-        planBasis: nullableNumber(revision.planBasis, null),
-        candidateBasis: nullableNumber(revision.candidateBasis, null),
-        model: number(revision.model),
-        narrationBasis: nullableNumber(revision.narrationBasis, null),
-        assessmentBasis: nullableNumber(revision.assessmentBasis, null),
-      }
-    : {
-        ...empty.revisions,
-        understoodDocument: understanding ? 0 : null,
-        planBasis: plan?.complete ? 0 : null,
-        candidateBasis: model ? 0 : null,
-        model: model ? 1 : 0,
-      }
+  const revisions = {
+    document: number(revision.document),
+    business: number(revision.business),
+    understoodDocument: nullableNumber(revision.understoodDocument, null),
+    planBasis: nullableNumber(revision.planBasis, null),
+    candidateBasis: nullableNumber(revision.candidateBasis, null),
+    model: number(revision.model),
+    narrationBasis: nullableNumber(revision.narrationBasis, null),
+    assessmentBasis: nullableNumber(revision.assessmentBasis, null),
+  }
   const outputs: Project['outputs'] = {}
-  const priorModel = record(current ? candidate.model : value)
-  if (
-    (understanding &&
-      understanding.narrative !== savedUnderstanding.narrative) ||
-    (strings(priorModel.questions).length > 0 &&
-      !Array.isArray(priorModel.boundaries))
-  )
+  if (understanding && understanding.narrative !== savedUnderstanding.narrative)
     revisions.business += 1
   const rawOutputs = record(value.outputs)
   for (const stage of stages)
@@ -485,6 +334,8 @@ export function restoreProject(value: unknown, empty: Project): Project {
     },
     understanding,
     plan,
+    narration: text(value.narration),
+    assessment: readAssessment(value.assessment),
     candidate: model
       ? {
           ...candidate,
@@ -492,37 +343,20 @@ export function restoreProject(value: unknown, empty: Project): Project {
           revision: number(candidate.revision, 1),
           documentRevision: number(candidate.documentRevision),
           edited: candidate.edited === true,
-          ...(candidate.expressionReview
-            ? {
-                expressionReview: readExpressionReview(
-                  candidate.expressionReview,
-                ),
-              }
-            : {}),
-          historicalQuestions: [
-            ...new Set([
-              ...strings(candidate.historicalQuestions),
-              ...strings(record(current ? candidate.model : value).questions),
-            ]),
-          ],
         }
       : null,
     answers,
     questionsSaved: value.questionsSaved === true,
     feedback: text(value.feedback),
-    feedbackDocumentRevision: current
-      ? nullableNumber(
-          value.feedbackDocumentRevision ?? revisions.document,
-          revisions.document,
-        )
-      : null,
-    narration: text(current ? value.narration : value.modelNarrative),
-    assessment: readAssessment(value.assessment),
+    feedbackDocumentRevision: nullableNumber(
+      value.feedbackDocumentRevision ?? revisions.document,
+      revisions.document,
+    ),
     outputs,
     timings: readTimings(value.timings),
     revisions,
     messages:
-      current && Array.isArray(value.messages)
+      Array.isArray(value.messages)
         ? records(value.messages).map((item) => ({
             ...item,
             id: typeof item.id === 'string' ? item.id : undefined,

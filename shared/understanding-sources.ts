@@ -2,9 +2,17 @@ import type { BusinessDocument, UnderstandingSources } from './analysis.ts'
 import { withoutQuestionSection } from './questions.ts'
 
 // A citation belongs to one complete Markdown line/paragraph. The clean text
-// remains the sole semantic input to modeling; IDs are provenance metadata.
+// remains the sole downstream input to modeling; IDs are provenance metadata.
 const marker = /\[\[source:([^\]\r\n]*)\]\]/g
-export const SOURCE_INSTRUCTIONS = `在整理稿中每个有原文依据的段落、列表条目或表格行末尾，追加 [[source:原文块id]]；综合多个块时用英文逗号分隔，如 [[source:block-1,block-2]]。文档问题说明应引用涉及的相关块。引用只作用于同一行，段落内不要手动换行。必须使用输入中真实的 id，不推测编号，不将 source 标记写在标题或待确认问题中。推断应在正文明确标为推断并引用相关背景；没有依据的内容不要补造引用。标记用于溯源，不表示推断已经得到原文证实。`
+export const SOURCE_INSTRUCTIONS = `原文溯源：
+- 整理稿中每个有原文依据的段落、列表项或表格行，行末追加 [[source:原文块id]]。
+- 一段内容综合多个原文块时，用英文逗号连接，例如 [[source:block-1,block-2]]。
+- 问题说明也要引用导致该问题的原文块。
+- 引用只对应同一行；段落内部不要手动换行。
+- 只能使用输入中真实存在的块 id，不能猜编号。
+- 标题和“待确认问题”标题不加 source 标记；问题的依据仍写在正文对应的说明行中。
+- 推断必须在正文标明“推断”，并引用支持它的背景；没有依据的内容不要添加引用。
+- source 标记只表示可以追溯到原文位置，不表示推断已经被原文证实。`
 
 export function normalizedPassage(value: string): string {
   return value

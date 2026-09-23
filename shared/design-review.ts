@@ -6,7 +6,7 @@ export interface DesignReview {
   rounds: { design: string; feedback: string; verdict: DesignVerdict }[]
   planVersion?: string
   narrativeVersion?: string
-  // New reviews use the derived basis; legacy reviews used the narrative.
+  // Reviews are tied to the business basis used for the current design.
   businessBasisVersion?: string
   feedbackDraft?: string
   reason?: 'sufficient' | 'clarify' | 'limit' | 'no-progress' | 'unavailable' | 'unrecognized' | 'interrupted'

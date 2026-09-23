@@ -3,16 +3,11 @@ import type {
   DiscussionRequest,
   DiscussionContext,
   ChatMessage,
-  AgentRuntimeId,
   ProviderId,
 } from '../../shared/analysis.ts'
 import { validateDocument, requireText } from './document.ts'
-import { parseCandidateModel } from './model.ts'
 import { isRecord } from './values.ts'
-import type { SemanticPlanV2 } from '../../shared/semantic.ts'
-import { parseResumeResult } from './resume.ts'
-import { readUnderstandingReview } from '../../shared/workflow.ts'
-import { validateSemanticPlan } from './semantic.ts'
+import { parseCandidateModel } from './model.ts'
 import { readDesignReview } from '../../shared/design-review.ts'
 import { parseReasoningEffort } from '../providers/reasoning.ts'
 
@@ -22,9 +17,8 @@ export function parseAnalysisRequest(
   defaultStage?: 'model',
 ): AnalysisRequest {
   if (!isRecord(input)) throw new Error('请求内容必须是 JSON 对象。')
-  const runtime = parseRuntime(input.runtime)
   const reasoningEffort = parseReasoningEffort(provider, input.reasoningEffort)
-  const selection = { provider, ...(runtime ? { runtime } : {}), ...(reasoningEffort ? { reasoningEffort } : {}) }
+  const selection = { provider, ...(reasoningEffort ? { reasoningEffort } : {}) }
   const stage = input.stage ?? defaultStage
   switch (stage) {
     case 'understand':
@@ -47,31 +41,20 @@ export function parseAnalysisRequest(
         narrative: input.narrative,
         model: input.model,
         instruction: input.instruction,
-        understandingReview: readUnderstandingReview(input.understandingReview),
       }
     }
     case 'compile':
-      requireText(input.semanticPlan, '建模说明')
+      requireText(input.modelDesign, '建模说明')
       requireText(input.narrative, '业务说明')
       if (input.businessBasis !== undefined && typeof input.businessBasis !== 'string')
         throw new Error('业务依据必须是文本。')
-      if (input.semantic !== undefined && !isRecord(input.semantic))
-        throw new Error('语义计划必须是对象。')
       return {
         ...selection,
         stage: 'compile',
-        semanticPlan: input.semanticPlan,
+        modelDesign: input.modelDesign,
         ...(input.designReview !== undefined ? { designReview: readDesignReview(input.designReview) } : {}),
         ...(typeof input.businessBasis === 'string' ? { businessBasis: input.businessBasis } : {}),
         narrative: input.narrative,
-        ...(isRecord(input.semantic)
-          ? {
-              semantic: validateSemanticPlan(
-                input.semantic as unknown as SemanticPlanV2,
-                input.narrative,
-              ),
-            }
-          : {}),
       }
     case 'narrate':
       return {
@@ -79,10 +62,6 @@ export function parseAnalysisRequest(
         stage: 'narrate',
         model: parseCandidateModel(input.model),
       }
-    case 'verify':
-    case 'map':
-      requireText(input.narrative, '业务说明')
-      return { ...selection, stage: stage === 'verify' ? 'verify' : 'map', narrative: input.narrative, result: parseResumeResult(input.result, input.narrative) }
     case 'assess':
       return {
         ...selection,
@@ -92,12 +71,6 @@ export function parseAnalysisRequest(
     default:
       throw new Error('未知建模阶段。')
   }
-}
-
-function parseRuntime(value: unknown): AgentRuntimeId | undefined {
-  if (value === undefined) return undefined
-  if (value === 'direct' || value === 'pi') return value
-  throw new Error('未知 Agent 运行时。')
 }
 
 export function parseDiscussionRequest(

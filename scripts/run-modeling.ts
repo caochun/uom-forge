@@ -10,7 +10,6 @@ import type { RunTurn } from '../server/providers/types.ts'
 import type { StageOptions } from '../server/stages/contracts.ts'
 import { isRecord } from '../server/validation/values.ts'
 import { requireText } from '../server/validation/document.ts'
-import { validateSemanticPlan } from '../server/validation/semantic.ts'
 
 const projectRoot = path.resolve(import.meta.dirname, '..')
 for (const [key, value] of Object.entries(
@@ -27,33 +26,24 @@ for (const [key, value] of Object.entries(
 const { values } = parseArgs({
   options: {
     input: { type: 'string' },
-    'semantic-plan': { type: 'string' },
-    semantic: { type: 'string' },
+    'model-design': { type: 'string' },
     narrative: { type: 'string' },
     provider: { type: 'string' },
   },
 })
-if (Boolean(values.input) === Boolean(values['semantic-plan']))
+if (Boolean(values.input) === Boolean(values['model-design']))
   throw new Error(
-    'Specify --input input.json OR --semantic-plan plan.md [--provider deepseek|gpt|qwen|glm]',
+    'Specify --input input.json OR --model-design plan.md [--narrative understanding.md] [--provider deepseek|gpt|qwen|glm]',
   )
-if (values.semantic && !values['semantic-plan'])
-  throw new Error('--semantic requires --semantic-plan.')
 const provider = resolveProvider(values.provider)
-const savedPlan = values['semantic-plan']
-  ? await readFile(values['semantic-plan'], 'utf8')
+const savedPlan = values['model-design']
+  ? await readFile(values['model-design'], 'utf8')
   : null
 const retryNarrative = values.narrative
   ? await readFile(values.narrative, 'utf8')
   : ''
 if (savedPlan !== null)
   requireText(retryNarrative, '重试检查所需的业务说明（--narrative）')
-const retrySemantic = values.semantic
-  ? validateSemanticPlan(
-      JSON.parse(await readFile(values.semantic, 'utf8')),
-      retryNarrative,
-    )
-  : undefined
 let input: ModelingInput | null = null
 if (values.input) {
   const value: unknown = JSON.parse(await readFile(values.input, 'utf8'))
@@ -71,10 +61,9 @@ const output = await mkdtemp(path.join(tmpdir(), 'forge-modeling-'))
 await writeFile(
   path.join(output, 'input.json'),
   JSON.stringify(
-    input || {
-      semanticPlan: savedPlan,
+      input || {
+      modelDesign: savedPlan,
       narrative: retryNarrative,
-      ...(retrySemantic ? { semantic: retrySemantic } : {}),
     },
     null,
     2,
@@ -84,7 +73,7 @@ const events: unknown[] = []
 const timings: unknown[] = []
 const started = Date.now()
 let turn = 0
-let part = 'semantic'
+let part = savedPlan === null ? 'basis' : 'compile'
 console.log(`Artifacts: ${output}`)
 try {
   const invoke: RunTurn = async (prompt, options) => {
@@ -133,7 +122,6 @@ try {
           retryNarrative,
           invoke,
           options,
-          retrySemantic,
         )
   await writeFile(
     path.join(output, 'result.json'),

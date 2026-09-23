@@ -64,8 +64,6 @@ const project = (): Project => ({
   feedbackDocumentRevision: 1,
   plan: { plan: 'saved plan', complete: true, compiled: false },
   candidate: null,
-  narration: '',
-  assessment: null,
   outputs: {},
   timings: {},
   messages: [],
@@ -76,8 +74,6 @@ const project = (): Project => ({
     planBasis: 1,
     candidateBasis: 1,
     model: 1,
-    narrationBasis: 1,
-    assessmentBasis: 1,
   },
 })
 
@@ -138,7 +134,6 @@ test('draft answers do not change the saved understanding and saving invalidates
   assert.equal(saved.revisions.business, initial.revisions.business + 1)
   assert.equal(freshness(saved.revisions).plan, true)
   assert.equal(freshness(saved.revisions).candidate, true)
-  assert.equal(freshness(saved.revisions).assessment, true)
   assert.equal(saveUnderstandingAnswers(saved).revisions, saved.revisions)
   const staleDocument = {
     ...saved,
@@ -172,7 +167,7 @@ test('multi-select is a set; blank answers and out-of-catalogue entries never be
   )
 })
 
-test('model and assessment clarifications join one catalogue without reopening answered questions', () => {
+test('model clarifications join one catalogue without reopening answered questions', () => {
   const saved = saveUnderstandingAnswers({
     ...project(),
     answers: { 0: '沿用通常方式' },
@@ -194,10 +189,6 @@ test('model and assessment clarifications join one catalogue without reopening a
     /决定归属关系是否允许指向多个事项/,
   )
   assert.equal(discovered.understanding!.questions.length, 3)
-  assert.equal(
-    receiveClarifications(discovered, [clarification], 'assess'),
-    discovered,
-  )
   assert.equal(
     receiveClarifications(
       discovered,
@@ -229,10 +220,6 @@ test('model and assessment clarifications join one catalogue without reopening a
   )
   assert.equal(restored.understanding!.confirmedAnswers[3], '可多个')
   assert.equal(restored.revisions.business, answered.revisions.business)
-  assert.equal(
-    receiveClarifications(restored, [clarification], 'assess'),
-    restored,
-  )
   const stale = {
     ...restored,
     revisions: { ...restored.revisions, document: 2 },

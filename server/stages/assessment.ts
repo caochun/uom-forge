@@ -1,7 +1,7 @@
 import type { Assessment } from '../../shared/analysis.ts'
 import type { CandidateModel } from '../../shared/model.ts'
 import type { RunTurn } from '../providers/types.ts'
-import type { StageOptions } from './contracts.ts'
+import { scopedTurn, type StageOptions } from './contracts.ts'
 import { ANALYST_INSTRUCTIONS } from './prompts.ts'
 import { ASSESSMENT_SCHEMA } from '../validation/assessment-schema.ts'
 import { parseAssessment } from '../validation/assessment.ts'
@@ -46,7 +46,7 @@ export async function assessModel(
   let previousOutput = ''
   for (let attempt = 0; attempt < 2; attempt++) {
     options.signal?.throwIfAborted()
-    const raw = await runTurn(assessmentPrompt(model, formatError, previousOutput), { ...options, outputFormat: 'json' })
+    const raw = await runTurn(assessmentPrompt(model, formatError, previousOutput), scopedTurn(options, 'assess'))
     options.signal?.throwIfAborted()
     try {
       return {

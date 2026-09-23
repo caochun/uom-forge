@@ -12,13 +12,13 @@ export function assessmentPrompt(model: CandidateModel, formatError = '', previo
   return `${ANALYST_INSTRUCTIONS}
 只判断模型表达能力，不把尚未实现的接口或算法等同于本体语义缺口；也不能因存在同名元素就判定可支撑。
 你现在只做业务过程支撑评估，不修改或新增模型元素。唯一业务输入是下面的候选模型，没有业务文档、前序业务理解或用户答案。
-覆盖模型中的全部 activities，只评估它们声明的目标 goal 和业务要求 requirements。逐项检查模型的对象、关系、操作、只读能力与规则能否支撑这些要求，不能从常识补入模型之外的过程或业务要求。
+覆盖模型中的全部 activities，只评估它们声明的目标 goal 和业务要求 requirements。逐项检查模型的对象、关系、操作、只读能力与规则能否支撑这些要求，不能从常识补入模型之外的过程或业务要求。本阶段不判断业务依据中的过程是否全部进入模型；该问题由模型设计阶段的表达检查和人工审阅负责。
 requirements 中的 elements 是待核验的支撑线索，不能因列出了引用或同名元素就判定可支撑。解释对象和关系如何共同表达业务事实、过程的前提、变化及产出如何被操作表达，查询和计算如何由只读能力表达。不要假定过程描述表示强制执行顺序。
 本轮模型只识别业务概念与语义，properties/inputs 有意留空。若 targets、描述、规则或效果已说明所需对象和业务上下文，就不能因没有标识字段、输入参数或接口定义而判为缺口。
 模型已明确的适用条件、业务分支和过程复用应直接采用，不重新列为待确认。如果模型内部表达矛盾或缺少足以判断的语义，指出具体模型缺口。
 对于复用已有过程的要求，沿复用说明检查被复用过程的实际支撑元素，引用对象、关系、action、function 或 rule 的 id；不把 activity id 当成支撑元素。明确的复用声明已经承接该过程的要求，不要求复制所有条目，也不重新询问是否需要承接；只有实际支撑缺失或存在矛盾才指出缺口。
 每个过程输出 requirements：
-- requirement：逐字沿用 activity.requirements 中的 description，每项要求都要评估，不合并、遗漏或补造。若 requirements 为空，只围绕该 activity 的 goal 判断；目标过于笼统时明确说明模型尚未定义足以检验的要求。
+- requirement：逐字沿用 activity.requirements 中的 description，每项要求都要评估，不合并、遗漏或补造。若 requirements 为空，输出 requirements: []，在过程级 reason 或 summary 中只围绕该 activity 的 goal 作整体判断；目标过于笼统时明确说明模型尚未定义足以逐项检验的要求。
 - elements：当前模型中实际参与表达此要求的对象、关系、action、function 或 rule 的 id。activity 本身不能作为支撑依据。不要填入建议新增的元素。
 - explanation：用自然语言说明这些元素如何共同表达业务事实、联系、行为或规则，以及为何作出此判断。没有支撑时明确说明未找到什么；不能只复述元素名称。
 - status：supported 表示已能表达，partial 表示已有部分依据但表达不完整，missing 表示没有有效支撑。supported、partial 必须引用实际元素。

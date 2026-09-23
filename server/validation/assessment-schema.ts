@@ -27,7 +27,7 @@ export const ASSESSMENT_SCHEMA = {
           reason: text,
           requirements: {
             type: 'array',
-            minItems: 1,
+            minItems: 0,
             items: {
               type: 'object',
               additionalProperties: false,

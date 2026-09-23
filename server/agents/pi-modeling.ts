@@ -21,7 +21,6 @@ const LOOP_INSTRUCTIONS = `Pi 设计迭代：
 - 工具返回独立审阅意见。只有意见指出了有业务依据的表达缺口时，才修改受影响的定义。
 - 保留没有受到影响的定义，并重新检查已经通过的情形。
 - 审阅意见不是新的业务事实；业务本身未决时保留边界，不替用户选择答案。
-- 审阅会检查实例区分、参与关系、状态保存和结果归属，但只在业务依据明确要求这些内容时落实，不根据常识补造。
 - 修订轮仍然输出完整设计并调用检查；不要输出计划、交接说明或重复整份检查报告。
 - 最多进行三轮检查。`
 
@@ -81,7 +80,7 @@ export async function runPiModeling(
   const parameters = Type.Object({})
   const tool: AgentTool<typeof parameters> = {
     name: 'check_expression', label: '检查设计的业务表达',
-    description: '沿用本轮业务依据和检验情形，检查当前正文能否表达具体事实或业务过程。检查参与关系、实例区分、状态保存和结果归属，但只检查业务依据明确涉及的内容。先输出完整设计；工具不需要设计或事实 JSON 参数。',
+    description: '沿用本轮业务依据和检验情形，检查当前正文能否表达具体事实或业务过程。先输出完整设计；工具不需要设计或事实 JSON 参数。',
     parameters,
     execute: async () => {
       await check()

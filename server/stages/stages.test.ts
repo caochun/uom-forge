@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { buildModel, compileModel } from './modeling.ts'
 import { validateCompiledModel } from '../validation/compiled-model.ts'
 import { extractQuestions } from '../../shared/questions.ts'
-import { businessBasisPrompt, compileModelPrompt, understandingPrompt } from './prompts.ts'
+import { businessBasisPrompt, compileModelPrompt, modelDesignPrompt, understandingPrompt } from './prompts.ts'
 import type { CandidateModel } from '../../shared/model.ts'
 import type { StageEvent } from '../../shared/analysis.ts'
 import { testAgents } from '../testing/agents.ts'
@@ -85,7 +85,13 @@ test('text stages retain their distinct responsibilities', () => {
   assert.match(understanding, /业务事实、业务故事和检验情形由下一阶段/)
   const basis = businessBasisPrompt('整理稿')
   assert.match(basis, /哪些事实和业务过程必须由领域模型表达/)
+  assert.match(basis, /每项事实表示一条模型必须保留的业务判断/)
+  assert.match(basis, /业务故事表示围绕同一事项、参与者或结果展开的连续业务过程/)
+  assert.match(basis, /检验情形是用于判断模型表达能力的具体案例/)
   assert.match(basis, /业务文档整理稿/)
+  const design = modelDesignPrompt({ feedback: '' }, basis)
+  assert.match(design, /模型设计阶段/)
+  assert.doesNotMatch(design, /第二阶段 A/)
   assert.match(compileModelPrompt('PLAN'), /只返回一个完整 JSON 对象/)
   assert.match(compileModelPrompt('PLAN'), /不重新提炼事实、组织故事/)
 })

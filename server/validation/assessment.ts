@@ -95,6 +95,7 @@ function readableSchemaErrors(
 function processStatus(
   requirements: Pick<RequirementAssessment, 'status'>[],
 ): SupportStatus {
+  if (!requirements.length) return 'partial'
   if (requirements.every((item) => item.status === 'supported'))
     return 'supported'
   if (requirements.every((item) => item.status === 'missing')) return 'missing'
@@ -132,21 +133,15 @@ export function parseAssessment(
       throw new Error(
         `评估引用了模型中不存在的业务过程：${process.processId}。`,
       )
-    if (activity.requirements.length) {
-      const declared = activity.requirements
-        .map((item) => item.description)
-        .sort()
-      const assessed = process.requirements
-        .map((item) => item.requirement)
-        .sort()
-      if (
-        declared.length !== assessed.length ||
-        declared.some((description, index) => assessed[index] !== description)
+    const declared = activity.requirements.map((item) => item.description).sort()
+    const assessed = process.requirements.map((item) => item.requirement).sort()
+    if (
+      declared.length !== assessed.length ||
+      declared.some((description, index) => assessed[index] !== description)
+    )
+      throw new Error(
+        `过程 ${activity.name} 的评估要求与模型声明不一致，不能遗漏或新增业务要求。`,
       )
-        throw new Error(
-          `过程 ${activity.name} 的评估要求与模型声明不一致，不能遗漏或新增业务要求。`,
-        )
-    }
     for (const requirement of process.requirements) {
       if (requirement.elements.some((id) => !elements.has(id)))
         throw new Error(

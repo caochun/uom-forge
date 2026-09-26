@@ -1,4 +1,4 @@
-import { READING_METHOD, MODELING_METHOD, LIFECYCLE_METHOD } from './methodology.ts'
+import { READING_METHOD, MODELING_METHOD, LIFECYCLE_BASIS_METHOD, LIFECYCLE_MODELING_METHOD } from './methodology.ts'
 import { COMPILE_OUTPUT_CONTRACT } from './output-contract.ts'
 import type { BusinessDocument, ModelingInput } from '../../shared/analysis.ts'
 import { modelContext } from './model-context.ts'
@@ -75,7 +75,7 @@ export function businessBasisPrompt(narrative: string): string {
 - 对每个重要计划或流程说明目标、参与者、业务事项、触发前提和上下文、必要步骤、分支、状态变化、结果及结果归属；明确说明智能体需要从模型推理出哪些部分。
 - 只记录材料中已有的顺序和因果，不为了凑流程补造步骤；同一事实只完整说明一次，流程部分可以引用已经说明的事实。
 - 不要把整理稿全文重新抄一遍。
-${LIFECYCLE_METHOD}
+${LIFECYCLE_BASIS_METHOD}
 业务规则：
 - 把规则作为模型必须保留的约束要求，保留建模需要的业务范围和所有明确规则，包括条件、例外、阈值、单位、逻辑组合、优先级、公式和否决条件；同时写清这些约束会限制什么事实、操作或推理结果。
 - 后续设计和检查只读取本份建模依据，因此不能用“按文档规定”“满足相关条件”或“见整理稿”代替具体约束。
@@ -126,7 +126,7 @@ export function modelDesignPrompt(
 - 判断与边界：只写尚未在定义中说明的取舍、未细化内容和不确定性；限制要同时写入受影响的定义。
 - 不把已知业务计划或流程编成模型元素。流程只作为表达和推理检查材料；领域模型应提供足够的对象、关系、状态变化、操作、只读能力和规则，使智能体能够根据目标和当前上下文推理出流程。
 ${MODELING_METHOD}
-${LIFECYCLE_METHOD}
+${LIFECYCLE_MODELING_METHOD}
 业务澄清边界：
 - 已有未决事项保留边界，不重复提问。
 - 只有新发现的歧义确实有两种受本轮建模依据支持的解释，且答案实质改变领域模型时，增加“## 需要补充的业务信息”。

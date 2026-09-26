@@ -53,7 +53,7 @@ export default function BusinessUnderstanding({
           <div className="panel-toolbar">
             <div>
               <h2 className="panel-title">业务文档整理稿</h2>
-              <div className="panel-subtitle">整理文档，发现表述问题；事实与故事在建模的“业务依据”中提炼。</div>
+              <div className="panel-subtitle">整理文档，发现表述问题；事实、已知业务计划、规则和检验情形在“建模依据”中提炼。</div>
             </div>
             <span className="stage-badge">{status}</span>
           </div>
@@ -84,7 +84,7 @@ export default function BusinessUnderstanding({
           </div>
           {!isLive && narrative && (
             <p className="reading-note">
-              请结合原文审阅整理稿和文档问题。保存问题答案会更新整理稿；开始建模后，将据此提炼业务依据，再设计并检查模型。
+              请结合原文审阅整理稿和文档问题。保存问题答案会更新整理稿；开始建模后，将据此提炼建模依据，再设计并检查模型。
             </p>
           )}
           {!isLive && !stream.narrative && understanding && <SourceCatalogue sources={understanding.sources} />}
@@ -116,7 +116,7 @@ export default function BusinessUnderstanding({
             <div>
               <strong>问题确认</strong>
               <p>
-                可以只回答部分问题。保存后并入整理稿，未回答的问题继续保留，并传给业务依据和模型设计。
+                可以只回答部分问题。保存后并入整理稿，未回答的问题继续保留，并传给建模依据和模型设计。
               </p>
             </div>
             <span
@@ -152,7 +152,7 @@ export default function BusinessUnderstanding({
                         建模发现
                       </span>
                       <dl>
-                        <dt>{question.clarification.basisSource === 'business-basis' ? '业务依据中的引文（提炼内容）' : '依据'}</dt>
+                        <dt>{question.clarification.basisSource === 'business-basis' ? '建模依据中的引文（提炼内容）' : '依据'}</dt>
                         <dd>{question.clarification.basis}</dd>
                         <dt>歧义</dt>
                         <dd>{question.clarification.ambiguity}</dd>

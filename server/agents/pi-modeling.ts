@@ -18,7 +18,7 @@ const LOOP_INSTRUCTIONS = `Pi 设计迭代：
 - 每轮先输出一份完整而简洁的当前模型设计，再在同一轮调用 check_expression。
 - check_expression 会自动读取这份正文；不要把设计复制到工具参数中。
 - 不需要调用提交或 finish 工具。
-- 工具返回独立审阅意见。只有意见指出了有业务依据的表达或推理缺口时，才修改受影响的定义。
+- 工具返回独立审阅意见。只有意见指出了有建模依据的表达或推理缺口时，才修改受影响的定义。
 - 保留没有受到影响的定义，并重新检查已经通过的情形。
 - 审阅意见不是新的业务事实；业务本身未决时保留边界，不替用户选择答案。
 - 修订轮仍然输出完整设计并调用检查；不要输出计划、交接说明或重复整份检查报告。
@@ -80,7 +80,7 @@ export async function runPiModeling(
   const parameters = Type.Object({})
   const tool: AgentTool<typeof parameters> = {
     name: 'check_expression', label: '检查设计的业务表达',
-    description: '沿用本轮业务依据和检验情形，检查当前正文能否表达或推理出具体事实和已知业务计划。先输出完整设计；工具不需要设计或事实 JSON 参数。',
+    description: '沿用本轮建模依据和检验情形，检查当前正文能否表达或推理出具体事实和已知业务计划。先输出完整设计；工具不需要设计或事实 JSON 参数。',
     parameters,
     execute: async () => {
       await check()

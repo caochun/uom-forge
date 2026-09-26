@@ -20,8 +20,8 @@ export function modelingProgress({ plan, candidate, runningPart, planStale, cand
   const active = runningPart === 'basis' ? 'basis' : runningPart === 'design' || runningPart === 'design-check' ? 'decisions'
     : runningPart === 'compile' ? 'compile' : undefined
   const steps: ProgressItem[] = [
-    { id: 'basis', tab: 'evidence', label: '业务依据',
-      detail: plan?.businessBasisComplete ? '业务依据已生成' : plan?.businessBasis ? '部分内容已保留' : '等待整理',
+    { id: 'basis', tab: 'evidence', label: '建模依据',
+      detail: plan?.businessBasisComplete ? '建模依据已生成' : plan?.businessBasis ? '部分内容已保留' : '等待整理',
       state: plan?.businessBasisComplete ? 'done' : 'waiting' },
     { id: 'decisions', tab: 'decisions', label: '模型设计',
       detail: plan?.designReview ? designReviewLabel(plan.designReview) : plan?.complete ? '设计草案已生成' : plan?.plan ? '部分设计已保留' : '等待生成设计',
@@ -32,11 +32,11 @@ export function modelingProgress({ plan, candidate, runningPart, planStale, cand
   ]
   for (const step of steps) {
     if (planStale && step.tab !== 'model' && step.state !== 'waiting') {
-      step.state = 'stale'; step.detail = step.id === 'basis' ? '业务依据需要更新' : '设计需要更新'
+      step.state = 'stale'; step.detail = step.id === 'basis' ? '建模依据需要更新' : '设计需要更新'
     }
     if (step.id === active) {
       step.state = 'active'
-      step.detail = step.id === 'basis' ? '正在整理业务依据' : step.id === 'decisions'
+      step.detail = step.id === 'basis' ? '正在整理建模依据' : step.id === 'decisions'
         ? plan?.designReview ? designReviewLabel(plan.designReview) : '正在生成设计草案' : '正在生成模型'
     }
   }

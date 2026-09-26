@@ -53,7 +53,7 @@ const uncertainCheck = (basis: string, frozen = false) =>
   })
 
 function designFixture(prompt: string, source: string): string | undefined {
-  if (prompt.includes('形成用于建模的业务依据')) return source
+  if (prompt.includes('形成建模依据')) return source
 }
 
 test('clarifications are review metadata with basis and impact, published before B and omitted from its input', async () => {
@@ -112,7 +112,7 @@ test('unsupported business questions cannot silently reach the user or compiler'
   assert.equal(calls, 2)
   assert.deepEqual(result.clarifications, [])
   assert.equal(result.modelDesign, plan)
-  assert.match(result.validation.warnings.join('\n'), /依据不在本轮业务依据或文档整理稿/)
+  assert.match(result.validation.warnings.join('\n'), /依据不在本轮建模依据或文档整理稿/)
   assert.throws(
     () =>
       parseModelClarifications(
@@ -240,5 +240,5 @@ test('questions quoting a paraphrased business basis reach users and survive com
   assert.deepEqual(retry.clarifications, result.clarifications)
   const fabricated = reviewModelClarifications(draft.replace(basis, '所有记录必须公开。'), reading, basis)
   assert.equal(fabricated.clarifications.length, 0)
-  assert.match(fabricated.warnings[0], /依据不在本轮业务依据或文档整理稿/)
+  assert.match(fabricated.warnings[0], /依据不在本轮建模依据或文档整理稿/)
 })

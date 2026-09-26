@@ -310,17 +310,17 @@ export function CandidateView({
       {mode === 'evidence' ? (
         <article className="panel-surface reading-narrative business-basis">
           <div className="panel-toolbar"><div>
-            <h2>业务依据</h2>
-            <p className="panel-subtitle">提炼事实、组织故事，明确模型需要表达什么；设计与表达检查共同使用本份依据。</p>
+            <h2>建模依据</h2>
+            <p className="panel-subtitle">提炼事实、已知业务计划、规则和检验情形，明确模型需要表达什么；设计与表达检查共同使用本份建模依据。</p>
           </div><span className="muted">{progress.steps.find(step => step.id === 'basis')?.detail}</span></div>
           {plan?.businessBasisReasoning && <ReasoningStream text={plan.businessBasisReasoning}
             active={!!running && progress.active?.id === 'basis' && !plan.businessBasis && !plan.businessBasisComplete}
             complete={!!plan.businessBasisComplete || !!plan.businessBasis} />}
           {plan?.businessBasis ? <Markdown>{plan.businessBasis}</Markdown> : (
-            <div className="empty-state">{progress.active?.id === 'basis' ? '正在从整理稿提炼事实、已知业务计划、规则与检验情形…' : plan?.businessBasisReasoning ? '本次尚未生成业务依据正文，已保留思考内容。' : '开始建模后，这里会展示从文档整理稿提炼的业务依据。'}</div>
+            <div className="empty-state">{progress.active?.id === 'basis' ? '正在从整理稿提炼事实、已知业务计划、规则与检验情形…' : plan?.businessBasisReasoning ? '本次尚未生成建模依据正文，已保留思考内容。' : '开始建模后，这里会展示从文档整理稿提炼的建模依据。'}</div>
           )}
           {plan?.basis && <details className="source-catalogue">
-            <summary>本轮依据来自的文档整理稿</summary>
+            <summary>本轮建模依据采用的文档整理稿</summary>
             <Markdown>{plan.basis.narrative}</Markdown>
             {plan.basis.sources && <SourceCatalogue sources={plan.basis.sources} />}
           </details>}
@@ -330,7 +330,7 @@ export function CandidateView({
           <div className="panel-toolbar">
             <div>
               <h2>模型设计</h2>
-              <p className="panel-subtitle">用对象、关系、操作、只读能力和规则表达业务依据，并通过具体情形检查与修订。</p>
+              <p className="panel-subtitle">用对象、关系、操作、只读能力和规则表达建模依据，并通过具体情形检查与修订。</p>
             </div>
             <span className="muted">
               {progress.steps.find((step) => step.id === 'decisions')?.detail}
@@ -346,15 +346,15 @@ export function CandidateView({
               {progress.active?.id === 'decisions'
                 ? '正在判断对象边界和业务联系…'
                 : plan?.businessBasis
-                  ? '业务依据已保留，模型设计尚未形成。'
-                  : '开始建模后，这里会解释模型的设计依据。'}
+                  ? '建模依据已保留，模型设计尚未形成。'
+                  : '开始建模后，这里会解释模型的设计取舍。'}
             </div>
           )}
           {plan?.designReview && <details className="reading-note design-review" open={plan.designReview.status === 'checking' || plan.designReview.status === 'attention'}>
             <summary>{designReviewLabel(plan.designReview)} · 已检查 {plan.designReview.rounds.length} 轮</summary>
             <p className="muted">{plan.designReview.businessBasisVersion
-              ? '沿用本轮业务依据中的检验情形，复查修订后的表达；通过仅针对本轮情形，不代表业务已穷尽。'
-            : '检查结论只针对本轮业务依据中的具体情形，不代表业务已穷尽。'}</p>
+              ? '沿用本轮建模依据中的检验情形，复查修订后的表达；通过仅针对本轮情形，不代表业务已穷尽。'
+            : '检查结论只针对本轮建模依据中的具体情形，不代表业务已穷尽。'}</p>
             {plan.designReview.rounds.map((round, index) => <section key={index}>
               <strong>第 {index + 1} 轮表达检查</strong>
               <Markdown>{round.feedback}</Markdown>
@@ -398,7 +398,7 @@ export function CandidateView({
           {progress.oldCandidate && (
             <Notice>
               {plan?.compiled
-                ? '业务依据已变化，当前模型需要重新建模更新。'
+                ? '建模依据已变化，当前模型需要重新建模更新。'
                 : '当前显示上轮保留的模型，本轮尚未生成新候选。'}
             </Notice>
           )}

@@ -39,8 +39,8 @@ test('partial compilation output survives reload without becoming a candidate, a
 test('interrupted design iteration retains complete design, partial revision and reviewer feedback on reload', () => {
   const stored: Project = { ...empty, plan: {
     plan: '完整设计。', complete: true, compiled: false, designDraft: '部分修订',
-    businessBasis: '业务依据。', businessBasisComplete: true,
-    designReview: { status: 'drafting', round: 2, businessBasisVersion: artifactVersion('业务依据。'), rounds: [
+    businessBasis: '建模依据。', businessBasisComplete: true,
+    designReview: { status: 'drafting', round: 2, businessBasisVersion: artifactVersion('建模依据。'), rounds: [
       { design: '完整设计。', verdict: 'revise', feedback: '办理操作缺少前提。' },
     ] },
   } }
@@ -50,7 +50,7 @@ test('interrupted design iteration retains complete design, partial revision and
   assert.equal(restored.plan?.designDraft, '部分修订')
   assert.equal(restored.plan?.designReview?.reason, 'interrupted')
   assert.equal(restored.plan?.designReview?.rounds[0].feedback, '办理操作缺少前提。')
-  assert.equal(restored.plan?.designReview?.businessBasisVersion, artifactVersion('业务依据。'))
+  assert.equal(restored.plan?.designReview?.businessBasisVersion, artifactVersion('建模依据。'))
 })
 test('understanding sources and the model’s original basis survive restoration independently', () => {
   const old = extractUnderstandingSources('客户提交。 [[source:b1]]', { name: '旧文档', blocks: [{ id: 'b1', text: '提交申请原文。' }] })

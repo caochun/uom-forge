@@ -47,7 +47,7 @@ export function parseAnalysisRequest(
       requireText(input.modelDesign, '建模说明')
       requireText(input.narrative, '业务说明')
       if (input.businessBasis !== undefined && typeof input.businessBasis !== 'string')
-        throw new Error('业务依据必须是文本。')
+        throw new Error('建模依据必须是文本。')
       return {
         ...selection,
         stage: 'compile',
@@ -63,7 +63,7 @@ export function parseAnalysisRequest(
         model: parseCandidateModel(input.model),
       }
     case 'assess':
-      requireText(input.businessBasis, '业务依据')
+      requireText(input.businessBasis, '建模依据')
       return {
         ...selection,
         stage: 'assess',

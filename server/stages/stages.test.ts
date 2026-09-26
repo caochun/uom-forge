@@ -23,9 +23,9 @@ const candidate = (): CandidateModel => ({
 
 test('the four-stage pipeline passes text artifacts forward and validates only final JSON', async () => {
   const events: StageEvent[] = []
-  const basis = '业务依据：事项形成成果，成果属于该事项。'
+  const basis = '建模依据：事项形成成果，成果属于该事项。'
   const runTurn = async (prompt: string, options: Parameters<import('../providers/types.ts').RunTurn>[1]) => {
-    if (prompt.includes('形成用于建模的业务依据')) {
+    if (prompt.includes('形成建模依据')) {
       options.onEvent?.({ type: 'delta', text: basis })
       return basis
     }

@@ -129,7 +129,7 @@ const EMPTY_PROJECT: Project = {
     {
       role: 'assistant',
       content:
-        '上传文档后先整理内容、发现表述问题。你可以修订整理稿或确认问题，再开始建模：提炼业务依据、设计并检查模型，最后生成模型视图。',
+        '上传文档后先整理内容、发现表述问题。你可以修订整理稿或确认问题，再开始建模：提炼建模依据、设计并检查模型，最后生成模型视图。',
     },
   ],
 }
@@ -543,7 +543,7 @@ function App() {
         }, revisions: { ...current.revisions, planBasis: basis } }))
       }
       if (event.type === 'business-basis') {
-        addModelActivity('业务依据已生成。')
+        addModelActivity('建模依据已生成。')
         setProject(current => ({ ...current, plan: {
           ...(current.plan || { plan: '', complete: false, compiled: false }),
           businessBasis: event.text, businessBasisComplete: true,
@@ -629,7 +629,7 @@ function App() {
       addMessage({
         role: 'assistant',
         content:
-          '文档整理已完成。请结合原文审阅整理稿和文档问题；点击“开始建模”后，将提炼业务依据并设计模型。',
+          '文档整理已完成。请结合原文审阅整理稿和文档问题；点击“开始建模”后，将提炼建模依据并设计模型。',
       })
     })
   const build = (retry = false) =>
@@ -1304,7 +1304,7 @@ function App() {
                     onChange={(event) => setEditedNarrative(event.target.value)}
                   />
                   <p>
-                    保存后，业务依据、模型和检验结果会标记需要更新。请保留必要的条件、公式和未决说法；待确认问题将按编辑后的内容重新解析。
+                    保存后，建模依据、模型和检验结果会标记需要更新。请保留必要的条件、公式和未决说法；待确认问题将按编辑后的内容重新解析。
                   </p>
                   <button
                     className="primary-button"

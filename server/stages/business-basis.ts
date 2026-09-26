@@ -8,7 +8,7 @@ export async function prepareBusinessBasis(narrative: string, options: StageOpti
   const prompt = businessBasisPrompt(narrative)
   const text = await (options.agents?.text || runPiText)(prompt, 'basis', options)
   options.signal?.throwIfAborted()
-  if (!text.trim()) throw new Error('未返回业务依据，请重试。')
+  if (!text.trim()) throw new Error('未返回建模依据，请重试。')
   options.onEvent?.({ type: 'business-basis', part: 'basis', text })
   return text
 }

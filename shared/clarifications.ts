@@ -163,7 +163,7 @@ export function reviewModelClarifications(
       if (businessBasis !== undefined && containsBasis(businessBasis, item.basis))
         item.basisSource = 'business-basis'
       else if (narrative === undefined || !containsBasis(narrative, item.basis))
-        throw new Error(`业务澄清“${item.text}”的依据不在${businessBasis === undefined ? '当前业务说明' : '本轮业务依据或文档整理稿'}中。`)
+        throw new Error(`业务澄清“${item.text}”的依据不在${businessBasis === undefined ? '当前业务说明' : '本轮建模依据或文档整理稿'}中。`)
       const key = questionKey(item.text)
       if (seen.has(key)) throw new Error(`业务澄清“${item.text}”重复。`)
       seen.add(key)

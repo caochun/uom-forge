@@ -14,6 +14,13 @@ test('decorated clarification headings still route questions out of compilation'
   assert.equal(normalizeModelPlan(normalized), normalized)
 })
 
+test('model design accepts the explicit unresolved-boundary heading', () => {
+  assert.equal(
+    normalizeModelPlan('## 建模判断与未决边界\n归属仍待确认。'),
+    '## 建模判断与未决边界\n归属仍待确认。',
+  )
+})
+
 test('inline understanding paragraphs keep their source citations after heading normalization', () => {
   const raw = `## 业务概述：${narrative} [[source:B1]]`
   const normalized = normalizeSectionHeadings(raw, ['业务概述'])

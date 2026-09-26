@@ -12,7 +12,7 @@ const narrative = '只有审核通过的申请才能办理。'
 const prepared = '业务事实：审核通过是办理前提。\n业务案例：申请未审核时不允许办理；审核通过后才可办理。'
 const initial = '申请是独立对象，办理操作改变申请状态。'
 const revised = '申请是独立对象，办理操作以审核通过为前提，然后改变申请状态。'
-const defect = '结论：需修改\n情形：申请未审核就办理。业务说明要求审核通过，但办理操作缺少前提，应增加审核通过条件。'
+const defect = '结论：需修改\n业务案例：申请未审核就办理。业务说明要求审核通过，但办理操作缺少前提，应增加审核通过条件。'
 const passed = '结论：可表达\n复查：未通过审核的申请被办理前提阻止；已通过审核的申请可以办理，结果属于该申请。'
 const frame = (delta: unknown, reason: string | null = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`
 const stream = (content: string, tool = false, reason?: string) => new Response(
@@ -33,7 +33,7 @@ function configure(t: TestContext) {
 const noTurn = async () => { throw new Error('must not call') }
 
 test('design review recognizes common Chinese revision conclusions', () => {
-  assert.equal(designVerdict('结论：可表达\n已能表达该情形。'), 'sufficient')
+  assert.equal(designVerdict('结论：可表达\n已能表达该业务案例。'), 'sufficient')
   assert.equal(designVerdict('结论：需要修改\n运行状态没有明确归属。'), 'revise')
   assert.equal(designVerdict('结论：存在缺口\n多个实例无法区分。'), 'revise')
   assert.equal(designVerdict('结论：需业务澄清\n边界影响模型选择。'), 'clarify')

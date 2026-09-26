@@ -53,7 +53,7 @@ const uncertainCheck = (basis: string, frozen = false) =>
   })
 
 function designFixture(prompt: string, source: string): string | undefined {
-  if (prompt.includes('形成建模依据')) return source
+  if (prompt.includes('领域语义需求说明')) return source
 }
 
 test('clarifications are review metadata with basis and impact, published before B and omitted from its input', async () => {

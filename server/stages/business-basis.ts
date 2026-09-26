@@ -4,7 +4,7 @@ import { businessBasisPrompt } from './prompts.ts'
 
 export async function prepareBusinessBasis(narrative: string, options: StageOptions = {}): Promise<string> {
   options.signal?.throwIfAborted()
-  options.onEvent?.({ type: 'phase', part: 'basis', text: '正在从整理稿提炼业务事实、已知业务计划、规则与检验情形。' })
+  options.onEvent?.({ type: 'phase', part: 'basis', text: '正在从整理稿提炼业务事实、已知业务计划、规则与业务案例。' })
   const prompt = businessBasisPrompt(narrative)
   const text = await (options.agents?.text || runPiText)(prompt, 'basis', options)
   options.signal?.throwIfAborted()

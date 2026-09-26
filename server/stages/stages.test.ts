@@ -25,7 +25,7 @@ test('the four-stage pipeline passes text artifacts forward and validates only f
   const events: StageEvent[] = []
   const basis = '建模依据：事项形成成果，成果属于该事项。'
   const runTurn = async (prompt: string, options: Parameters<import('../providers/types.ts').RunTurn>[1]) => {
-    if (prompt.includes('形成建模依据')) {
+    if (prompt.includes('领域语义需求说明')) {
       options.onEvent?.({ type: 'delta', text: basis })
       return basis
     }
@@ -83,16 +83,16 @@ test('compiled output rejects dangling references and invented evidence', () => 
 test('text stages retain their distinct responsibilities', () => {
   const understanding = understandingPrompt({ name: 'test', blocks: [{ id: '1', text: '业务说明' }] })
   assert.match(understanding, /文档阅读工作/)
-  assert.match(understanding, /业务事实、已知业务计划和检验情形由下一阶段/)
+  assert.match(understanding, /业务事实、已知业务计划和业务案例由下一阶段/)
   const basis = businessBasisPrompt('整理稿')
   assert.match(basis, /领域语义需求说明/)
-  assert.match(basis, /必须直接表达哪些事实和约束/)
+  assert.match(basis, /必须直接表达哪些业务事实和约束/)
   assert.match(basis, /必须能够根据这些语义推理出哪些已知业务计划/)
-  assert.match(basis, /建议按业务范围、必须表达的事实、必须保留的约束/)
+  assert.match(basis, /建议按“业务范围与目标”“必须表达的事实”“必须保留的约束”/)
   assert.match(basis, /每项事实表示一条模型需要直接表达的业务判断/)
-  assert.match(basis, /已知业务计划或流程是建模时的检验目标/)
-  assert.match(basis, /初始上下文或目标/)
-  assert.match(basis, /检验情形是用于判断领域模型能否表达或推理出业务含义的具体案例/)
+  assert.match(basis, /已知业务计划或流程是模型设计需要支持的已知业务内容/)
+  assert.match(basis, /初始上下文、目标或触发条件/)
+  assert.match(basis, /业务案例是从已列出的事实、规则或已知业务计划中抽出的具体业务实例/)
   assert.match(basis, /业务文档整理稿/)
   const design = modelDesignPrompt({ feedback: '' }, basis)
   assert.match(design, /模型设计阶段/)

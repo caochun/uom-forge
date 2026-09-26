@@ -80,7 +80,7 @@ export async function runPiModeling(
   const parameters = Type.Object({})
   const tool: AgentTool<typeof parameters> = {
     name: 'check_expression', label: '检查设计的业务表达',
-    description: '沿用本轮建模依据和检验情形，检查当前正文能否表达或推理出具体事实和已知业务计划。先输出完整设计；工具不需要设计或事实 JSON 参数。',
+    description: '沿用本轮建模依据和业务案例，检查当前正文能否表达或推理出具体事实和已知业务计划。先输出完整设计；工具不需要设计或事实 JSON 参数。',
     parameters,
     execute: async () => {
       await check()

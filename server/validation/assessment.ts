@@ -48,7 +48,7 @@ function describeLocation(path: string, root: unknown): string {
       const process = Number(segments[++index])
       const name = valueAt(root, ['processAssessments', String(process), 'processName'])
       parts.push(
-        `第 ${process + 1} 个业务过程${typeof name === 'string' && name ? `（${name}）` : ''}`,
+        `第 ${process + 1} 个业务计划${typeof name === 'string' && name ? `（${name}）` : ''}`,
       )
     } else if (segment === 'requirements' && /^\d+$/.test(segments[index + 1] || '')) {
       parts.push(`第 ${Number(segments[++index]) + 1} 项要求`)
@@ -119,29 +119,14 @@ export function parseAssessment(
     ].map((item) => item.id),
   )
   validateClarifications(value.clarifications, modelContext(model))
-  if (model.activities.length && !value.processAssessments.length)
-    throw new Error('业务过程支撑评估没有包含模型中的业务过程。')
   const processes = new Set<string>()
   for (const process of value.processAssessments) {
     if (!process.processId || processes.has(process.processId))
-      throw new Error('评估中的业务过程 id 无效或重复。')
+      throw new Error('检验中的业务计划 id 无效或重复。')
     processes.add(process.processId)
-    const activity = model.activities.find(
-      (item) => item.id === process.processId,
-    )
-    if (!activity)
-      throw new Error(
-        `评估引用了模型中不存在的业务过程：${process.processId}。`,
-      )
-    const declared = activity.requirements.map((item) => item.description).sort()
     const assessed = process.requirements.map((item) => item.requirement).sort()
-    if (
-      declared.length !== assessed.length ||
-      declared.some((description, index) => assessed[index] !== description)
-    )
-      throw new Error(
-        `过程 ${activity.name} 的评估要求与模型声明不一致，不能遗漏或新增业务要求。`,
-      )
+    if (new Set(assessed).size !== assessed.length)
+      throw new Error(`业务计划 ${process.processName} 的评估要求重复。`)
     for (const requirement of process.requirements) {
       if (requirement.elements.some((id) => !elements.has(id)))
         throw new Error(
@@ -163,9 +148,6 @@ export function parseAssessment(
       }
     }
   }
-  for (const activity of model.activities)
-    if (!processes.has(activity.id))
-      throw new Error(`业务过程支撑评估遗漏了 ${activity.name}。`)
   return {
     ...value,
     processAssessments: value.processAssessments.map((process) => ({

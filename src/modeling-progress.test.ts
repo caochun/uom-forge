@@ -12,7 +12,7 @@ const candidate: CandidateDraft = {
   documentRevision: 1,
   model: {
     schemaVersion: '1', name: '事项', summary: '登记事项',
-    objects: [], relations: [], actions: [], functions: [], rules: [], activities: [], boundaries: [],
+    objects: [], relations: [], actions: [], functions: [], rules: [], boundaries: [],
   },
 }
 const plan: ModelDesign = {

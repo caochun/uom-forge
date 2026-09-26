@@ -29,10 +29,7 @@ export function parseCandidateModel(
   for (const item of [...value.actions, ...value.functions])
     if (item.targets.some((id) => !objects.has(id)))
       throw new Error(`操作/能力 ${item.id} 引用了不存在的目标对象。`)
-  for (const item of [
-    ...value.rules,
-    ...value.activities.flatMap((activity) => activity.requirements),
-  ]) {
+  for (const item of value.rules) {
     if (item.elements.some((id) => !ids.has(id)))
       throw new Error(
         `规则/活动引用了不存在的模型元素：${item.elements.join(', ')}`,

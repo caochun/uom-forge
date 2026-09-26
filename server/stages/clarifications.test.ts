@@ -31,7 +31,6 @@ const model: CandidateModel = {
   actions: [],
   functions: [],
   rules: [],
-  activities: [],
   boundaries: ['记录如何归属事项尚未确定。'],
 }
 const uncertainCheck = (basis: string, frozen = false) =>

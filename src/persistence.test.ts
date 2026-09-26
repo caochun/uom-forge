@@ -118,7 +118,6 @@ test('restoring an existing draft preserves the document, edits, answers, feedba
         actions: [],
         functions: [],
         rules: [],
-        activities: [],
         questions: [],
       },
     },

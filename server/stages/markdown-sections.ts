@@ -11,7 +11,7 @@ export function normalizeSectionHeadings(markdown: string, titles: readonly stri
 }
 
 export const MODEL_SECTIONS = [
-  '模型概述', '对象及边界', '关系', '业务操作', '只读能力', '业务规则', '业务过程', '建模判断与边界',
+  '模型概述', '对象及边界', '关系', '业务操作', '只读能力', '业务规则', '建模判断与边界',
 ] as const
 
 export function normalizeModelPlan(plan: string): string {

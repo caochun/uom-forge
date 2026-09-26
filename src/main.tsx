@@ -108,7 +108,7 @@ const STAGES = {
   model: '建立候选模型',
   compile: '整理候选模型',
   narrate: '生成模型自述',
-  assess: '评估业务过程支撑',
+  assess: '检验已知业务情形',
 }
 const EMPTY_PROJECT: Project = {
   version: 4,
@@ -721,7 +721,10 @@ function App() {
         setNarrationStream({ text: '', reasoning: '' })
       }
       if (only !== 'narrate') {
-        const result = await runStage('assess', { model })
+        const result = await runStage('assess', {
+          model,
+          businessBasis: project.plan?.businessBasis || '',
+        })
         setProject(current =>
           receiveClarifications(
             {
@@ -735,7 +738,7 @@ function App() {
         )
         setAssessmentStream({ text: '', reasoning: '' })
       }
-      addMessage({ role: 'assistant', content: '本次模型检验已完成。请根据自述和业务过程支撑结果审阅模型。' })
+      addMessage({ role: 'assistant', content: '本次模型检验已完成。请根据模型自述和已知业务情形检验结果审阅模型。' })
     })
   const upload = async (file?: File) => {
     if (!file || busyRef.current) return
@@ -1193,7 +1196,7 @@ function App() {
               text={modelRunning ? job.text : ''}
               elapsed={elapsed}
               status={modelRunStatus}
-              activities={modelActivity}
+              events={modelActivity}
               records={modelTimingRecords}
               onStop={stop}
               onView={viewModelStep}
@@ -1374,7 +1377,7 @@ function App() {
                   disabled={busy || !canCheck}
                   onClick={() => checkModel('assess')}
                 >
-                  仅评估业务过程支撑
+                  检验已知业务情形
                 </button>
               </div>
               <ReviewView

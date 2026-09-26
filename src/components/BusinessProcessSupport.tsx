@@ -112,7 +112,7 @@ export default function BusinessProcessSupport({
     return (
       <>
         {stream && <StructuredStream
-          title="业务过程支撑评估"
+          title="业务情形检验"
           text={stream.text}
           reasoning={stream.reasoning}
           active={running}
@@ -121,21 +121,21 @@ export default function BusinessProcessSupport({
         <div className="empty-state panel-surface">
           {running
             ? '正在逐项检查业务要求与模型表达…'
-            : '还没有业务过程支撑评估。生成候选模型后，可以开始评估。'}
+            : '还没有业务情形检验。生成候选模型后，可以开始检验。'}
         </div>
       </>
     )
   return (
     <section
       className="business-process-support"
-      aria-label="业务过程支撑评估结果"
+      aria-label="业务情形检验结果"
     >
       <article className="support-overview panel-surface">
         <div className="panel-toolbar">
           <div>
-            <h2>业务过程支撑</h2>
+            <h2>业务情形检验</h2>
             <p className="panel-subtitle">
-              模型中的业务过程需要什么 · 模型如何支撑 · 还需要补齐什么
+              已知业务计划需要什么 · 模型如何表达或推理 · 还需要补齐什么
             </p>
           </div>
         </div>
@@ -159,7 +159,7 @@ export default function BusinessProcessSupport({
                 onClick={() => setFilter(value)}
               >
                 <span>
-                  {value === 'all' ? '全部业务过程' : STATUS[value].label}
+                  {value === 'all' ? '全部业务计划' : STATUS[value].label}
                 </span>
                 <strong>
                   {value === 'all'
@@ -172,7 +172,7 @@ export default function BusinessProcessSupport({
         </div>
       </article>
       {stream && <StructuredStream
-        title="业务过程支撑评估"
+        title="业务情形检验"
         text={stream.text}
         reasoning={stream.reasoning}
         active={running}
@@ -180,7 +180,7 @@ export default function BusinessProcessSupport({
       />}
       {rows.some((row) => !row.requirements.length) && (
         <p className="notice" role="status">
-          这份评估含有旧版结果，尚未记录逐项支撑依据。请点击“仅评估业务过程支撑”生成新的对照明细。
+          这份检验含有旧版结果，尚未记录逐项依据。请重新运行“业务情形检验”生成新的对照明细。
         </p>
       )}
       <div className="support-process-list">
@@ -323,7 +323,7 @@ export default function BusinessProcessSupport({
                       }
                     >
                       <MessageCircle size={14} />
-                      讨论此业务过程
+                      讨论此业务计划
                     </button>
                   </div>
                 </div>
@@ -334,8 +334,8 @@ export default function BusinessProcessSupport({
         {!visible.length && (
           <p className="empty-state panel-surface">
             {rows.length
-              ? '没有符合此状态的业务过程。'
-              : '本次评估未列出可评估的业务过程。'}
+              ? '没有符合此状态的业务计划。'
+              : '本次检验未列出可评估的业务计划。'}
           </p>
         )}
       </div>

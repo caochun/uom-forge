@@ -18,7 +18,6 @@ const candidate = (): CandidateModel => ({
   relations: [{ id: 'produces', name: '形成', description: '事项形成成果。', from: 'req', to: 'result', properties: [], evidence: [] }],
   actions: [{ id: 'record-result', name: '登记成果', description: '登记形成的成果。', targets: ['result'], inputs: [], preconditions: [], effects: ['创建成果'], evidence: [] }],
   functions: [], rules: [{ id: 'trace', name: '可追溯', description: '成果需追溯事项。', elements: ['req', 'result', 'produces'], evidence: [] }],
-  activities: [{ id: 'process', name: '办理事项', goal: '形成成果', evidence: [], requirements: [{ description: '登记成果及其来源', elements: ['record-result', 'produces'], status: 'partial', reason: '待业务审阅', evidence: [] }] }],
   boundaries: [],
 })
 
@@ -76,24 +75,26 @@ test('compiled output rejects dangling references and invented evidence', () => 
   const evidence = candidate()
   evidence.objects[0].evidence = [{ quote: 'invented' }]
   assert.throws(() => validateCompiledModel(JSON.stringify(evidence)))
+  const legacy = { ...candidate(), activities: [] }
+  assert.throws(() => validateCompiledModel(JSON.stringify(legacy)), /模型结构不完整/)
   assert.throws(() => validateCompiledModel('{}'))
 })
 
 test('text stages retain their distinct responsibilities', () => {
   const understanding = understandingPrompt({ name: 'test', blocks: [{ id: '1', text: '业务说明' }] })
   assert.match(understanding, /文档阅读工作/)
-  assert.match(understanding, /业务事实、业务故事和检验情形由下一阶段/)
+  assert.match(understanding, /业务事实、已知业务计划和检验情形由下一阶段/)
   const basis = businessBasisPrompt('整理稿')
-  assert.match(basis, /哪些事实和业务过程必须由领域模型表达/)
+  assert.match(basis, /领域模型必须表达哪些事实、规则和已知业务情形/)
   assert.match(basis, /每项事实表示一条模型必须保留的业务判断/)
-  assert.match(basis, /业务故事表示围绕同一事项、参与者或结果展开的连续业务过程/)
-  assert.match(basis, /检验情形是用于判断模型表达能力的具体案例/)
+  assert.match(basis, /已知业务计划或流程是建模时的检验目标/)
+  assert.match(basis, /检验情形是用于判断领域模型能否表达或推理出业务含义的具体案例/)
   assert.match(basis, /业务文档整理稿/)
   const design = modelDesignPrompt({ feedback: '' }, basis)
   assert.match(design, /模型设计阶段/)
   assert.doesNotMatch(design, /第二阶段 A/)
   assert.match(compileModelPrompt('PLAN'), /只返回一个完整 JSON 对象/)
-  assert.match(compileModelPrompt('PLAN'), /不重新提炼事实、组织故事/)
+  assert.match(compileModelPrompt('PLAN'), /不重新提炼事实、组织计划/)
 })
 
 test('confirmation choices preserve punctuation and multiple selection', () => {

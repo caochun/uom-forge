@@ -4,9 +4,10 @@ Evidence-first domain modeling workbench. Forge produces a provider-neutral cand
 model from business documents and lets a domain expert review the evidence before it
 is exported to a runtime-specific model.
 
-The project will encode a repeatable modeling methodology that helps domain experts
-identify stable concepts, business objects, facts, relations, constraints, and
-capabilities before describing business processes.
+The project encodes a repeatable methodology for deriving a provider-neutral domain
+semantic model. Known business plans and processes remain modeling evidence: the
+agent uses them to test whether the semantic model can express and infer the required
+facts, rather than compiling those processes into the model itself.
 
 ## Prototype
 
@@ -28,17 +29,17 @@ every call receives explicit stage inputs, without earlier conversation history.
 | `src/types.ts`、`src/persistence.ts` | 前端草稿和视图类型；只解码当前四阶段草稿格式 |
 | `src/document.ts`、`src/responses.ts` | 文档处理、SSE 读取、响应边界与阶段结果检查 |
 
-`stages/understanding.ts` 整理文档并发现表述问题，`stages/business-basis.ts` 提炼事实、组织故事并形成建模要求，`agents/pi-modeling.ts` 设计候选模型并在同一 Pi loop 中审阅，`stages/modeling.ts` 负责编译最终 JSON。Pi 的业务理解和依据共用单轮 `agents/pi-text.ts`；设计和审阅使用同一份业务依据及检验情形，检查意见为自由文本，不增加格式修复或完成交接回合。运行时校验放在 `validation/`。
+`stages/understanding.ts` 整理文档并发现表述问题，`stages/business-basis.ts` 提炼事实、已知业务计划、规则、边界和检验情形，`agents/pi-modeling.ts` 设计领域语义模型并在同一 Pi loop 中检查，`stages/modeling.ts` 负责编译最终 JSON。Pi 的业务理解和依据共用单轮 `agents/pi-text.ts`；设计和检查使用同一份业务依据，检查意见为自由文本，不把已知流程编译成模型元素。运行时校验放在 `validation/`。
 
 | 步骤 | 业务输入 | 输出 |
 | --- | --- | --- |
 | 业务理解 | 原始文档 | 忠实的文档整理稿、表述问题及原文引用 |
-| 业务依据 | 当前整理稿及已保存确认 | 事实、故事、完整规则、未决边界和检验情形 |
+| 业务依据 | 当前整理稿及已保存确认 | 事实、已知业务计划、完整规则、未决边界和检验情形 |
 | 模型设计 | 业务依据；迭代时的候选与设计反馈 | 模型定义、设计理由和边界 |
-| 设计表达检查（Pi 内部） | 同一份业务依据、当前设计；复查时加上一版设计与先前意见 | 情形的表达路径、缺口及修订反馈 |
+| 设计表达检查（Pi 内部） | 同一份业务依据、当前设计；复查时加上一版设计与先前意见 | 已知情形的表达/推理路径、缺口及修订反馈 |
 | 模型 JSON | 仅模型设计 | 经本地结构和引用校验的候选模型 |
 
-业务理解从阅读理解和文档表达的角度理顺语句、层次和上下文，指出歧义与矛盾，不预先按建模类别提炼内容，不再规定七个业务主题。原文块引用可用于追溯，无法关联时保留整理稿并提示，不进行逐块覆盖验收或格式重试。业务依据再提炼建模要求，保留具体条件、阈值和公式，不能用“按文档规定”替代；它不强制 facts/stories JSON、固定编号或枚举。设计与检查直接承接这份依据，不重复传入整理稿全文。Pi Agent 始终围绕同一个核心问题进行建模：当前对象、关系、业务操作、只读能力和规则，能否表达具体业务事实或过程？详见 [语义交接规范](docs/semantic-handoff.md) 和 [软方法学](docs/软方法学：从业务事实到候选模型.md)。
+业务理解从阅读理解和文档表达的角度理顺语句、层次和上下文，指出歧义与矛盾，不预先按建模类别提炼内容。原文块引用可用于追溯，无法关联时保留整理稿并提示，不进行逐块覆盖验收或格式重试。业务依据再提炼领域模型必须表达或能够推理出的事实、已知业务计划、规则、边界和检验情形，保留具体条件、阈值和公式，不能用“按文档规定”替代；它使用可审阅的半结构化 Markdown，不强制 facts/stories JSON、固定编号或枚举。设计与检查直接承接这份依据，不重复传入整理稿全文。Pi Agent 始终围绕同一个核心问题进行建模：当前对象、关系、业务操作、只读能力和规则，能否表达或推理出业务依据中的具体事实和已知业务计划？详见 [软方法学](docs/软方法学：从业务事实到候选模型.md)。
 
 最终编译先机械处理代码围栏和固定空元数据，再检查 JSON 结构、唯一 ID、端点和引用；不静默删除未知引用或补造业务对象。校验失败最多增加一次 JSON 修复调用，不再使用 Pi 的提交工具回合。Pi 首轮设计通过时从阅读到模型共五次调用，每次语义修订增加设计与复查两次，最多三轮。业务待澄清、检查失败或达到上限时保留设计和意见，继续编译，不恢复旧的逐条事实映射。结构通过不代表业务正确，用户仍应结合业务依据、模型设计和原文审阅。
 
@@ -106,8 +107,9 @@ the GPT provider uses `GPT_API_URL`, `GPT_API_KEY` and `GPT_MODEL`; the Qwen
 provider uses `QWEN_API_URL`, `QWEN_API_KEY` and `QWEN_MODEL`.
 GLM uses `GLM_API_KEY`, with optional `GLM_API_URL` and `GLM_MODEL`.
 All four use streaming Chat Completions over HTTP and expose the same staged
-interface and return the same validated provider-neutral model containing objects,
-relations, actions, functions, rules, activities, boundaries and textual evidence.
+interface and return the same validated provider-neutral domain model containing objects,
+relations, actions, functions, rules, boundaries and textual evidence. Known business
+plans remain in the business basis used for modeling checks; they are not model elements.
 `/api/discuss` uses the selected provider through the same interface.
 
 The UI uses GLM and the Pi Agent workflow. Users can switch provider and reasoning

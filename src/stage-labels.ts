@@ -7,5 +7,5 @@ export const STAGE_PART_LABELS: Record<StagePart, string> = {
   'design-check': '设计检查',
   compile: '模型编译',
   narrate: '模型自述',
-  assess: '业务过程支撑',
+  assess: '业务情形检验',
 }

@@ -10,7 +10,6 @@ import type {
   CandidateModel,
   Evidence,
   Property,
-  Requirement,
 } from '../shared/model.ts'
 import type { Project, ModelDesign } from './types.ts'
 import { isRecord, number, record, records, strings, text } from './values.ts'
@@ -22,7 +21,7 @@ import { readDesignReview, interruptDesignReview } from '../shared/design-review
 const stages = ['understand', 'model', 'compile', 'narrate', 'assess'] as const
 const STAGE_PART_LABELS: Record<string, string> = {
   reading: '业务理解', basis: '业务依据', design: '模型设计',
-  'design-check': '设计检查', compile: '模型编译', narrate: '模型自述', assess: '业务过程支撑',
+  'design-check': '设计检查', compile: '模型编译', narrate: '模型自述', assess: '业务情形检验',
 }
 const evidence = (value: unknown): Evidence[] =>
   records(value).map((item) => ({ quote: text(item.quote) }))
@@ -58,7 +57,7 @@ function properties(value: unknown): Property[] {
 // are discarded instead of being interpreted as one of the removed workflows.
 function readModel(value: unknown): CandidateModel | null {
   if (!isRecord(value) || !Array.isArray(value.objects)) return null
-  const { questions: _questions, ...modelData } = value
+  const { questions: _questions, activities: _activities, ...modelData } = value
   return {
     ...modelData,
     schemaVersion: '1',
@@ -91,26 +90,6 @@ function readModel(value: unknown): CandidateModel | null {
     rules: records(value.rules).map((item) => ({
       ...element(item),
       elements: strings(item.elements),
-    })),
-    activities: records(value.activities).map((item) => ({
-      ...item,
-      id: text(item.id),
-      name: text(item.name),
-      goal: text(item.goal),
-      evidence: evidence(item.evidence),
-      requirements: records(item.requirements).map(
-        (requirement): Requirement => ({
-          ...requirement,
-          description: text(requirement.description),
-          elements: strings(requirement.elements),
-          status:
-            requirement.status === 'covered' || requirement.status === 'missing'
-              ? requirement.status
-              : 'partial',
-          reason: text(requirement.reason),
-          evidence: evidence(requirement.evidence),
-        }),
-      ),
     })),
     boundaries: strings(value.boundaries),
   }

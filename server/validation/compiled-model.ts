@@ -2,7 +2,7 @@ import type { CandidateModel } from '../../shared/model.ts'
 import { parseCandidateModel } from './model.ts'
 import { isRecord, parseJsonOutput } from './values.ts'
 
-const COLLECTIONS = ['objects', 'relations', 'actions', 'functions', 'rules', 'activities'] as const
+const COLLECTIONS = ['objects', 'relations', 'actions', 'functions', 'rules'] as const
 
 /** Add fields that carry no semantics in the design-only compilation round. */
 function normalizeCompiledValue(value: unknown): unknown {
@@ -21,18 +21,6 @@ function normalizeCompiledValue(value: unknown): unknown {
       const normalized: Record<string, unknown> = { ...item, evidence: item.evidence ?? [] }
       if (key === 'objects' || key === 'relations') normalized.properties = item.properties ?? []
       if (key === 'actions' || key === 'functions') normalized.inputs = item.inputs ?? []
-      if (key === 'activities' && Array.isArray(item.requirements)) {
-        normalized.requirements = item.requirements.map((requirement) =>
-          isRecord(requirement)
-            ? {
-                ...requirement,
-                status: requirement.status ?? 'partial',
-                reason: requirement.reason ?? '待业务审阅',
-                evidence: requirement.evidence ?? [],
-              }
-            : requirement,
-        )
-      }
       return normalized
     })
   }
@@ -48,13 +36,5 @@ export function validateCompiledModel(raw: string): CandidateModel {
   for (const item of [...candidate.actions, ...candidate.functions]) {
     if (item.inputs.length) throw new Error('本轮不细化操作和能力的输入字段。')
   }
-  for (const activity of candidate.activities)
-    for (const requirement of activity.requirements) {
-      if (
-        requirement.status !== 'partial' ||
-        requirement.reason !== '待业务审阅'
-      )
-        throw new Error('模型编译阶段不会判断业务是否已表达。')
-    }
   return candidate
 }

@@ -105,8 +105,7 @@ async function compileReviewedPlan(
       model.relations.length +
       model.actions.length +
       model.functions.length +
-      model.rules.length +
-      model.activities.length
+      model.rules.length
     const clarificationMap = new Map(
       review.clarifications.map((item) => [questionKey(item.text), item]),
     )

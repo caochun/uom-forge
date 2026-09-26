@@ -317,7 +317,7 @@ export function CandidateView({
             active={!!running && progress.active?.id === 'basis' && !plan.businessBasis && !plan.businessBasisComplete}
             complete={!!plan.businessBasisComplete || !!plan.businessBasis} />}
           {plan?.businessBasis ? <Markdown>{plan.businessBasis}</Markdown> : (
-            <div className="empty-state">{progress.active?.id === 'basis' ? '正在从整理稿提炼事实、故事、规则与检验情形…' : plan?.businessBasisReasoning ? '本次尚未生成业务依据正文，已保留思考内容。' : '开始建模后，这里会展示从文档整理稿提炼的业务依据。'}</div>
+            <div className="empty-state">{progress.active?.id === 'basis' ? '正在从整理稿提炼事实、已知业务计划、规则与检验情形…' : plan?.businessBasisReasoning ? '本次尚未生成业务依据正文，已保留思考内容。' : '开始建模后，这里会展示从文档整理稿提炼的业务依据。'}</div>
           )}
           {plan?.basis && <details className="source-catalogue">
             <summary>本轮依据来自的文档整理稿</summary>
@@ -580,7 +580,7 @@ export function ReviewView({
           label="模型检验方式"
           items={[
             ['narration', '模型自述'],
-            ['assessment', '业务过程支撑'],
+            ['assessment', '业务情形检验'],
           ]}
           value={mode}
           onChange={onMode}

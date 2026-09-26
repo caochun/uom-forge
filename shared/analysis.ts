@@ -44,6 +44,7 @@ export interface ProcessAssessment {
 }
 export interface Assessment {
   summary: string
+  // These rows describe business plans from the basis, not model elements.
   processAssessments: ProcessAssessment[]
   recommendations: string[]
   clarifications: BusinessClarification[]
@@ -145,7 +146,7 @@ export type AnalysisRequest = { provider: ProviderId; reasoningEffort?: Reasonin
       narrative: string
     }
   | { stage: 'narrate'; model: CandidateModel }
-  | { stage: 'assess'; model: CandidateModel }
+  | { stage: 'assess'; model: CandidateModel; businessBasis: string }
 )
 export interface DiscussionRequest {
   provider: ProviderId

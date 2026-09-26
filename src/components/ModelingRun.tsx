@@ -20,7 +20,7 @@ export default function ModelingRun({
   text,
   elapsed,
   status,
-  activities,
+  events,
   records,
   onStop,
   onView,
@@ -30,7 +30,7 @@ export default function ModelingRun({
   text: string
   elapsed: number
   status?: ModelRunStatus
-  activities: string[]
+  events: string[]
   records: (StageTiming & { label: string })[]
   onStop: () => void
   onView: (step: ProgressItem) => void
@@ -120,9 +120,9 @@ export default function ModelingRun({
               </li>
             ))}
           </ol>
-          {!!activities.length && (
+          {!!events.length && (
             <ol className="modeling-activity" aria-label="运行记录">
-              {activities.map((activity, index) => (
+              {events.map((activity, index) => (
                 <li key={`${index}-${activity}`}>
                   <p>{activity}</p>
                 </li>

@@ -49,22 +49,5 @@ export const MODEL_SCHEMA = record({
     record({ ...identity, targets: texts, inputs: properties, output: text }),
   ),
   rules: list(record({ ...identity, elements: texts })),
-  activities: list(
-    record({
-      id: text,
-      name: text,
-      goal: text,
-      evidence,
-      requirements: list(
-        record({
-          description: text,
-          elements: texts,
-          status: { enum: ['covered', 'partial', 'missing'] },
-          reason: text,
-          evidence,
-        }),
-      ),
-    }),
-  ),
   boundaries: texts,
 })

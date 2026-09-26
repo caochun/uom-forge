@@ -24,7 +24,6 @@ const model = (evidence: Evidence[]): CandidateModel => ({
   actions: [],
   functions: [],
   rules: [],
-  activities: [],
   boundaries: [],
 })
 

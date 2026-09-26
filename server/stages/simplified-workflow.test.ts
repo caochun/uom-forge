@@ -8,7 +8,7 @@ import { testAgents } from '../testing/agents.ts'
 const model: CandidateModel = {
   schemaVersion: '1', name: '申请', summary: '申请通过后可办理。',
   objects: [{ id: 'application', name: '申请', description: '待办理的申请。', properties: [], evidence: [] }],
-  relations: [], actions: [], functions: [], rules: [], activities: [], boundaries: [],
+  relations: [], actions: [], functions: [], rules: [], boundaries: [],
 }
 
 test('the model stage has exactly one text basis, one Pi design and one JSON compilation boundary', async () => {

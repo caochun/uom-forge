@@ -41,6 +41,6 @@ export async function runStage(
     case 'narrate':
       return narrateModel(request.model, runTurn, configured)
     case 'assess':
-      return assessModel(request.model, runTurn, configured)
+      return assessModel(request.model, request.businessBasis, runTurn, configured)
   }
 }

@@ -15,7 +15,7 @@ const artifacts = await mkdtemp(path.join(tmpdir(), 'forge-ui-'))
 const model: CandidateModel = {
   schemaVersion: '1', name: '订单模型', summary: '客户提交订单。',
   objects: [{ id: 'order', name: '订单', description: '客户提交的订单。', properties: [], evidence: [] }],
-  relations: [], actions: [], functions: [], rules: [], activities: [], boundaries: [],
+  relations: [], actions: [], functions: [], rules: [], boundaries: [],
 }
 const project: Project = {
   version: 4,
@@ -63,7 +63,7 @@ await page.evaluate(async () => {
   for (let i = 0; i < 20 && !harness.emitModelEvent; i++) await new Promise(resolve => setTimeout(resolve, 10))
   harness.emitModelEvent({ type: 'business-basis', part: 'basis', text: '业务依据流。' })
   harness.emitModelEvent({ type: 'model-design', part: 'design', modelDesign: '模型设计流。', clarifications: [], warnings: [] })
-  harness.emitModelEvent({ type: 'result', result: { modelDesign: '模型设计流。', businessBasis: '业务依据流。', clarifications: [], model: { schemaVersion: '1', name: '订单模型', summary: '客户提交订单。', objects: [{ id: 'order', name: '订单', description: '客户提交的订单。', properties: [], evidence: [] }], relations: [], actions: [], functions: [], rules: [], activities: [], boundaries: [] }, provenance: { basis: 'business-understanding', evidence: 'unlinked' }, validation: { elements: 1, warnings: [] } } })
+  harness.emitModelEvent({ type: 'result', result: { modelDesign: '模型设计流。', businessBasis: '业务依据流。', clarifications: [], model: { schemaVersion: '1', name: '订单模型', summary: '客户提交订单。', objects: [{ id: 'order', name: '订单', description: '客户提交的订单。', properties: [], evidence: [] }], relations: [], actions: [], functions: [], rules: [], boundaries: [] }, provenance: { basis: 'business-understanding', evidence: 'unlinked' }, validation: { elements: 1, warnings: [] } } })
   await pending
 })
 assert.deepEqual(await page.evaluate(() => (window as unknown as Harness).lastModelRequest?.stage), 'model')

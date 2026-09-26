@@ -37,12 +37,6 @@ export function modelContext(value: unknown): Record<string, unknown> | null {
       inputs: properties(item.inputs),
     })),
     rules: list(model.rules).map((item) => pick(item, [...fields, 'elements'])),
-    activities: list(model.activities).map((item) => ({
-      ...pick(item, ['id', 'name', 'goal']),
-      requirements: list(item.requirements).map((requirement) =>
-        pick(requirement, ['description', 'elements']),
-      ),
-    })),
     boundaries: Array.isArray(model.boundaries)
       ? model.boundaries.filter((item) => typeof item === 'string')
       : [],
@@ -53,7 +47,6 @@ export function modelContext(value: unknown): Record<string, unknown> | null {
     context.actions,
     context.functions,
     context.rules,
-    context.activities,
   ].some((items) => items.length) ||
     context.boundaries.length ||
     (typeof model.summary === 'string' && model.summary.trim())

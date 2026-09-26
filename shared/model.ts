@@ -42,20 +42,6 @@ export interface BusinessFunction extends Element {
 export interface Rule extends Element {
   elements: string[]
 }
-export interface Requirement {
-  description: string
-  elements: string[]
-  status: 'covered' | 'partial' | 'missing'
-  reason: string
-  evidence: Evidence[]
-}
-export interface Activity {
-  id: string
-  name: string
-  goal: string
-  evidence: Evidence[]
-  requirements: Requirement[]
-}
 export interface CandidateModel {
   schemaVersion: '1'
   name: string
@@ -65,7 +51,6 @@ export interface CandidateModel {
   actions: Action[]
   functions: BusinessFunction[]
   rules: Rule[]
-  activities: Activity[]
   boundaries: string[]
 }
 
@@ -75,5 +60,4 @@ export const MODEL_COLLECTIONS = [
   'actions',
   'functions',
   'rules',
-  'activities',
 ] as const

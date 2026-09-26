@@ -63,10 +63,12 @@ export function parseAnalysisRequest(
         model: parseCandidateModel(input.model),
       }
     case 'assess':
+      requireText(input.businessBasis, '业务依据')
       return {
         ...selection,
         stage: 'assess',
         model: parseCandidateModel(input.model),
+        businessBasis: input.businessBasis,
       }
     default:
       throw new Error('未知建模阶段。')

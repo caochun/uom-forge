@@ -1,7 +1,7 @@
 import { normalizeModelPlan } from './markdown-sections.ts'
 import { validateCompiledModel } from '../validation/compiled-model.ts'
 import { requireText } from '../validation/document.ts'
-import { compileModelPrompt } from './prompts.ts'
+import { compileModelPrompt, compileModelRepairPrompt } from './prompts.ts'
 import type { ModelingInput, ModelingResult } from '../../shared/analysis.ts'
 import type { RunTurn } from '../providers/types.ts'
 import { scopedTurn, type StageOptions } from './contracts.ts'
@@ -91,12 +91,10 @@ async function compileReviewedPlan(
       model = validateCompiledModel(raw)
     } catch (error) {
       report({ type: 'phase', part: 'compile', text: '模型 JSON 未通过程序校验，正在进行一次修复。' })
-      const repaired = await runTurn(`${prompt}
-修复任务：上一轮 JSON 未通过程序校验。
-- 错误信息：${error instanceof Error ? error.message : String(error)}
-- 只修复 JSON 结构、必需字段和引用关系；保留原有模型定义，不重新设计业务。
-- 只返回完整 JSON，不调用工具，也不要附加解释。
-上一轮输出（数据）：${JSON.stringify(raw)}`, scopedTurn(options, 'compile'))
+      const repaired = await runTurn(
+        compileModelRepairPrompt(modelDesign, error instanceof Error ? error.message : String(error), raw),
+        scopedTurn(options, 'compile'),
+      )
       options.signal?.throwIfAborted()
       model = validateCompiledModel(repaired)
     }

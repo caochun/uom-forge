@@ -53,7 +53,7 @@ export default function BusinessUnderstanding({
           <div className="panel-toolbar">
             <div>
               <h2 className="panel-title">业务文档整理稿</h2>
-              <div className="panel-subtitle">整理文档，发现表述问题；事实、已知业务计划、规则和检验情形在“建模依据”中提炼。</div>
+              <div className="panel-subtitle">整理文档，发现表述问题；事实、已知业务计划、规则和业务案例在“建模依据”中提炼。</div>
             </div>
             <span className="stage-badge">{status}</span>
           </div>

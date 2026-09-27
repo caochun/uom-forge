@@ -27,7 +27,7 @@ export default function CompilationStream({ output, active }: {
       {output.text ? <pre ref={body} className="compilation-json" role="region" aria-label="模型 JSON 实时输出" tabIndex={0}
         onScroll={event => {
           const element = event.currentTarget
-          follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 32
+          follow.current = element.scrollHeight - element.scrollTop - element.clientHeight <= 1
         }}>{output.text}</pre> : <p className="reading-note" role="status">
         {active ? '等待模型正文，思考内容会实时显示。' : '本次尚未收到模型正文。'}
       </p>}

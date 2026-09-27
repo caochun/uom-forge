@@ -1,4 +1,4 @@
-import type { CandidateModel, Evidence } from './model.ts'
+import type { CandidateModel } from './model.ts'
 import type { DesignReview } from './design-review.ts'
 import type { ReasoningEffort } from './reasoning.ts'
 
@@ -24,31 +24,25 @@ export interface BusinessClarification extends ClarificationReason {
   options: string[]
   multiple: boolean
 }
-export type SupportStatus = 'supported' | 'partial' | 'missing'
-export interface RequirementAssessment {
-  requirement: string
+export type SupportStatus = 'supported' | 'partial' | 'missing' | 'clarify'
+export interface CaseAssessment {
+  caseId: string
+  scenario: string
+  basis: string
   status: SupportStatus
   elements: string[]
   explanation: string
   gap: string
   suggestion: string
-  evidence: Evidence[]
-}
-export interface ProcessAssessment {
-  processId: string
-  processName: string
-  status: SupportStatus
-  reason: string
-  requirements: RequirementAssessment[]
-  evidence: Evidence[]
 }
 export interface Assessment {
   summary: string
-  // These rows describe business plans from the basis, not model elements.
-  processAssessments: ProcessAssessment[]
+  // Cases come from the modeling basis and do not need to belong to a process.
+  caseAssessments: CaseAssessment[]
   recommendations: string[]
   clarifications: BusinessClarification[]
   historicalQuestions?: string[]
+  historicalReport?: string
 }
 export interface Understanding {
   narrative: string
@@ -81,6 +75,7 @@ export interface ModelingInput {
   // Reviewed document text. Only basis preparation reads it; design/review use businessBasis.
   narrative: string
   currentModel?: unknown
+  // Expression feedback cannot introduce business facts; update narrative first.
   feedback?: string
 }
 export interface ModelingResult {

@@ -127,7 +127,7 @@ export default function ModelElementPreview({
           讨论此项
         </button>
         <button className="text-button" onClick={onClose}>
-          返回业务情形检验
+          返回业务案例检查
         </button>
       </div>
     </dialog>

@@ -1,29 +1,12 @@
 import { Ajv } from 'ajv'
-import type {
-  Assessment,
-  ProcessAssessment,
-  SupportStatus,
-  RequirementAssessment,
-} from '../../shared/analysis.ts'
+import type { Assessment } from '../../shared/analysis.ts'
 import type { CandidateModel } from '../../shared/model.ts'
 import { ASSESSMENT_SCHEMA } from './assessment-schema.ts'
 import { validateClarifications } from './clarifications.ts'
-import { modelContext } from '../stages/model-context.ts'
+import { containsBasis } from '../../shared/clarifications.ts'
 
 const ajv = new Ajv({ allErrors: true })
-type AssessmentOutput = Omit<Assessment, 'processAssessments'> & {
-  processAssessments: (Omit<
-    ProcessAssessment,
-    'status' | 'evidence' | 'requirements'
-  > & {
-    status?: SupportStatus
-    evidence?: []
-    requirements: (Omit<RequirementAssessment, 'evidence'> & {
-      evidence?: []
-    })[]
-  })[]
-}
-const validateSchema = ajv.compile<AssessmentOutput>(ASSESSMENT_SCHEMA)
+const validateSchema = ajv.compile<Assessment>(ASSESSMENT_SCHEMA)
 
 function valueAt(root: unknown, segments: string[]): unknown {
   let current = root
@@ -36,7 +19,7 @@ function valueAt(root: unknown, segments: string[]): unknown {
   return current
 }
 
-// Ajv reports machine paths like data/processAssessments/1; reviewers and the
+// Ajv reports machine paths like data/caseAssessments/1; reviewers and the
 // structured retry both need the location and the offending field in words.
 function describeLocation(path: string, root: unknown): string {
   const segments = path.split('/').filter(Boolean)
@@ -44,14 +27,10 @@ function describeLocation(path: string, root: unknown): string {
   const parts: string[] = []
   for (let index = 0; index < segments.length; index++) {
     const segment = segments[index]
-    if (segment === 'processAssessments' && /^\d+$/.test(segments[index + 1] || '')) {
-      const process = Number(segments[++index])
-      const name = valueAt(root, ['processAssessments', String(process), 'processName'])
-      parts.push(
-        `第 ${process + 1} 个业务计划${typeof name === 'string' && name ? `（${name}）` : ''}`,
-      )
-    } else if (segment === 'requirements' && /^\d+$/.test(segments[index + 1] || '')) {
-      parts.push(`第 ${Number(segments[++index]) + 1} 项要求`)
+    if (segment === 'caseAssessments' && /^\d+$/.test(segments[index + 1] || '')) {
+      const caseIndex = Number(segments[++index])
+      const id = valueAt(root, ['caseAssessments', String(caseIndex), 'caseId'])
+      parts.push(`第 ${caseIndex + 1} 个业务案例${typeof id === 'string' && id ? `（${id}）` : ''}`)
     } else if (segment === 'clarifications' && /^\d+$/.test(segments[index + 1] || '')) {
       parts.push(`第 ${Number(segments[++index]) + 1} 条澄清`)
     } else if (segment === 'recommendations' && /^\d+$/.test(segments[index + 1] || '')) {
@@ -92,18 +71,10 @@ function readableSchemaErrors(
   })
   return [...new Set(lines)].slice(0, 5).join(' ')
 }
-function processStatus(
-  requirements: Pick<RequirementAssessment, 'status'>[],
-): SupportStatus {
-  if (!requirements.length) return 'partial'
-  if (requirements.every((item) => item.status === 'supported'))
-    return 'supported'
-  if (requirements.every((item) => item.status === 'missing')) return 'missing'
-  return 'partial'
-}
 export function parseAssessment(
   value: unknown,
   model: CandidateModel,
+  businessBasis: string,
 ): Assessment {
   if (!validateSchema(value))
     throw new Error(
@@ -118,46 +89,31 @@ export function parseAssessment(
       ...model.rules,
     ].map((item) => item.id),
   )
-  validateClarifications(value.clarifications, modelContext(model))
-  const processes = new Set<string>()
-  for (const process of value.processAssessments) {
-    if (!process.processId || processes.has(process.processId))
-      throw new Error('检验中的业务计划 id 无效或重复。')
-    processes.add(process.processId)
-    const assessed = process.requirements.map((item) => item.requirement).sort()
-    if (new Set(assessed).size !== assessed.length)
-      throw new Error(`业务计划 ${process.processName} 的评估要求重复。`)
-    for (const requirement of process.requirements) {
-      if (requirement.elements.some((id) => !elements.has(id)))
-        throw new Error(
-          `过程 ${process.processName} 的业务要求引用了不存在或不能作为支撑依据的模型元素。`,
-        )
-      if (requirement.status !== 'missing' && !requirement.elements.length)
-        throw new Error(
-          `过程 ${process.processName} 的业务要求声称有支撑，但没有引用模型元素。`,
-        )
-      if (requirement.status === 'supported') {
-        if (requirement.gap.trim() || requirement.suggestion.trim())
-          throw new Error(
-            `过程 ${process.processName} 的业务要求标记为可支撑，却仍有缺口或补齐建议。`,
-          )
-      } else if (!requirement.gap.trim() || !requirement.suggestion.trim()) {
-        throw new Error(
-          `过程 ${process.processName} 的业务要求缺少具体缺口或改进建议。`,
-        )
-      }
+  validateClarifications(value.clarifications, businessBasis)
+  const ids = new Set<string>()
+  const scenarios = new Set<string>()
+  for (const item of value.caseAssessments) {
+    const id = item.caseId.trim()
+    const scenario = item.scenario.trim().replace(/\s+/g, ' ')
+    if (ids.has(id) || !scenario || scenarios.has(scenario))
+      throw new Error('业务案例编号或内容重复、无效。')
+    ids.add(id)
+    scenarios.add(scenario)
+    if (!containsBasis(businessBasis, item.basis))
+      throw new Error(`业务案例 ${id} 的依据不在本次建模依据中。`)
+    if (item.elements.some((element) => !elements.has(element)))
+      throw new Error(`业务案例 ${id} 引用了不存在的模型元素。`)
+    if ((item.status === 'supported' || item.status === 'partial') && !item.elements.length)
+      throw new Error(`业务案例 ${id} 声称有支撑，但没有引用模型元素。`)
+    if (item.status === 'supported') {
+      if (item.gap.trim() || item.suggestion.trim())
+        throw new Error(`业务案例 ${id} 标记为可表达，却仍有缺口或补齐建议。`)
+    } else if (!item.gap.trim() || !item.suggestion.trim()) {
+      throw new Error(`业务案例 ${id} 缺少具体缺口或未决边界及处理建议。`)
     }
   }
   return {
     ...value,
-    processAssessments: value.processAssessments.map((process) => ({
-      ...process,
-      evidence: [],
-      requirements: process.requirements.map((requirement) => ({
-        ...requirement,
-        evidence: [],
-      })),
-      status: processStatus(process.requirements),
-    })),
+    clarifications: value.clarifications.map((item) => ({ ...item, basisSource: 'business-basis' })),
   }
 }

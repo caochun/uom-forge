@@ -27,7 +27,8 @@ export default function ReasoningStream({ text, active, complete }: {
       <div className="reasoning-stream" ref={bodyRef} role="region" aria-label="模型思考过程" tabIndex={0}
         onScroll={event => {
           const body = event.currentTarget
-          follow.current = body.scrollHeight - body.scrollTop - body.clientHeight < 32
+          // Even a small upward gesture means the user is reading earlier output.
+          follow.current = body.scrollHeight - body.scrollTop - body.clientHeight <= 1
         }}>
         {text}
       </div>

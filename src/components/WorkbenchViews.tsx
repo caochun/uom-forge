@@ -38,7 +38,7 @@ import type {
   WorkspaceDocument,
   ReviewViewMode,
 } from '../types.ts'
-import BusinessProcessSupport from './BusinessProcessSupport.tsx'
+import BusinessCaseAssessment from './BusinessCaseAssessment.tsx'
 import StructuredStream from './StructuredStream.tsx'
 
 export function Switcher<T extends string>({
@@ -311,13 +311,13 @@ export function CandidateView({
         <article className="panel-surface reading-narrative business-basis">
           <div className="panel-toolbar"><div>
             <h2>建模依据</h2>
-            <p className="panel-subtitle">提炼事实、已知业务计划、规则和检验情形，明确模型需要表达什么；设计与表达检查共同使用本份建模依据。</p>
+            <p className="panel-subtitle">提炼事实、已知业务计划、规则和业务案例，明确模型需要表达什么；设计与表达检查共同使用本份建模依据。</p>
           </div><span className="muted">{progress.steps.find(step => step.id === 'basis')?.detail}</span></div>
           {plan?.businessBasisReasoning && <ReasoningStream text={plan.businessBasisReasoning}
             active={!!running && progress.active?.id === 'basis' && !plan.businessBasis && !plan.businessBasisComplete}
             complete={!!plan.businessBasisComplete || !!plan.businessBasis} />}
           {plan?.businessBasis ? <Markdown>{plan.businessBasis}</Markdown> : (
-            <div className="empty-state">{progress.active?.id === 'basis' ? '正在从整理稿提炼事实、已知业务计划、规则与检验情形…' : plan?.businessBasisReasoning ? '本次尚未生成建模依据正文，已保留思考内容。' : '开始建模后，这里会展示从文档整理稿提炼的建模依据。'}</div>
+            <div className="empty-state">{progress.active?.id === 'basis' ? '正在从整理稿提炼事实、已知业务计划、规则与业务案例…' : plan?.businessBasisReasoning ? '本次尚未生成建模依据正文，已保留思考内容。' : '开始建模后，这里会展示从文档整理稿提炼的建模依据。'}</div>
           )}
           {plan?.basis && <details className="source-catalogue">
             <summary>本轮建模依据采用的文档整理稿</summary>
@@ -353,7 +353,7 @@ export function CandidateView({
           {plan?.designReview && <details className="reading-note design-review" open={plan.designReview.status === 'checking' || plan.designReview.status === 'attention'}>
             <summary>{designReviewLabel(plan.designReview)} · 已检查 {plan.designReview.rounds.length} 轮</summary>
             <p className="muted">{plan.designReview.businessBasisVersion
-              ? '沿用本轮建模依据中的检验情形，复查修订后的表达；通过仅针对本轮情形，不代表业务已穷尽。'
+              ? '沿用本轮建模依据中的业务案例，复查修订后的表达；通过仅针对本轮案例，不代表业务已穷尽。'
             : '检查结论只针对本轮建模依据中的具体情形，不代表业务已穷尽。'}</p>
             {plan.designReview.rounds.map((round, index) => <section key={index}>
               <strong>第 {index + 1} 轮表达检查</strong>
@@ -580,7 +580,7 @@ export function ReviewView({
           label="模型检验方式"
           items={[
             ['narration', '模型自述'],
-            ['assessment', '业务情形检验'],
+            ['assessment', '业务案例检查'],
           ]}
           value={mode}
           onChange={onMode}
@@ -608,7 +608,7 @@ export function ReviewView({
           </article>
         </div>
       ) : (
-        <BusinessProcessSupport
+        <BusinessCaseAssessment
           assessment={assessment}
           running={running === 'assess'}
           stream={assessmentStream}

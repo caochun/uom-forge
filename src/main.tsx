@@ -108,7 +108,7 @@ const STAGES = {
   model: '建立候选模型',
   compile: '整理候选模型',
   narrate: '生成模型自述',
-  assess: '检验已知业务情形',
+  assess: '检查业务案例',
 }
 const EMPTY_PROJECT: Project = {
   version: 4,
@@ -738,7 +738,7 @@ function App() {
         )
         setAssessmentStream({ text: '', reasoning: '' })
       }
-      addMessage({ role: 'assistant', content: '本次模型检验已完成。请根据模型自述和已知业务情形检验结果审阅模型。' })
+      addMessage({ role: 'assistant', content: '本次模型检验已完成。请根据模型自述和已知业务案例检查结果审阅模型。' })
     })
   const upload = async (file?: File) => {
     if (!file || busyRef.current) return
@@ -1377,7 +1377,7 @@ function App() {
                   disabled={busy || !canCheck}
                   onClick={() => checkModel('assess')}
                 >
-                  检验已知业务情形
+                  检查业务案例
                 </button>
               </div>
               <ReviewView
@@ -1399,11 +1399,11 @@ function App() {
               {project.understanding && (
                 <section className="feedback-panel panel-surface">
                   <label htmlFor="model-feedback">下一轮建模反馈</label>
-                  <p>明确需要调整的业务含义和边界。保存后重新建模时会使用这份反馈。</p>
+                  <p>指出当前模型未表达清楚的内容，重新建模时会使用这份反馈。新增或修改业务事实、规则，请先在业务理解中修改并保存。</p>
                   <textarea
                     id="model-feedback"
                     rows={3}
-                    placeholder="例如：补充某个业务操作的前提、结果归属或适用边界…"
+                    placeholder="例如：建模依据已说明操作前提，但当前模型遗漏了这一条件…"
                     value={project.feedback}
                     disabled={busy}
                     onChange={event => updateFeedback(event.target.value)}
@@ -1471,6 +1471,7 @@ function App() {
                     <button
                       className="text-button"
                       disabled={busy || !project.understanding}
+                      title="用于调整模型表达；业务事实或规则变更请先保存到业务理解。"
                       onClick={() => {
                         updateFeedback(
                           [

@@ -49,16 +49,45 @@ test('the four-stage pipeline passes text artifacts forward and validates only f
   assert.deepEqual(events.filter(event => event.type === 'delta').map(event => event.part), ['basis', 'design', 'compile'])
 })
 
-test('compiler retries only invalid JSON and preserves the saved design', async () => {
+test('compiler uses a dedicated repair with the original design, error and previous output', async () => {
   let calls = 0
   const result = await compileModel(plan, '事项形成成果。', async prompt => {
     calls++
     if (calls === 1) assert.equal(prompt, compileModelPrompt(plan))
+    else {
+      assert.match(prompt, /角色：模型 JSON 修复器/)
+      assert.doesNotMatch(prompt, /编译目标：/)
+      assert.ok(prompt.includes(JSON.stringify(plan)))
+      assert.ok(prompt.includes(JSON.stringify('not json')))
+      assert.match(prompt, /校验错误（数据）/)
+    }
     return calls === 1 ? 'not json' : JSON.stringify(candidate())
   })
   assert.equal(calls, 2)
   assert.equal(result.modelDesign, plan)
   assert.deepEqual(result.model, candidate())
+})
+
+test('compilation keeps attribute and input semantics in definitions through structural repair', async () => {
+  const design = '## 对象\n事项 req：包含本次办理额度和有效期。\n## 业务操作\n登记成果 record-result：输入语义为本次事项和本次额度，办理额度不能超过 100 万元。'
+  const compiled = candidate()
+  compiled.objects[0].description = '事项包含本次办理额度和有效期。'
+  compiled.actions[0].description = '按本次事项和本次额度登记成果。'
+  compiled.actions[0].preconditions = ['本次额度 ≤ 100 万元']
+  const invalid = structuredClone(compiled)
+  invalid.actions[0].inputs = [{ name: '本次额度', type: 'number', description: '单位为万元。', evidence: [] }]
+  let calls = 0
+  const result = await compileModel(design, 'NARRATIVE_NOT_COMPILER_INPUT', async prompt => {
+    calls++
+    assert.ok(prompt.includes(JSON.stringify(design)))
+    assert.doesNotMatch(prompt, /NARRATIVE_NOT_COMPILER_INPUT/)
+    if (calls === 1) return JSON.stringify(invalid)
+    assert.ok(prompt.includes(JSON.stringify(JSON.stringify(invalid))))
+    assert.match(prompt, /必要输入语义/)
+    return JSON.stringify(compiled)
+  })
+  assert.equal(calls, 2)
+  assert.deepEqual(result.model, compiled)
 })
 
 test('missing business input stops before any provider call', async () => {

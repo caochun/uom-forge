@@ -309,3 +309,33 @@ test('design reasoning survives an interrupted draft and invalid values are drop
   assert.equal(invalid.plan?.designReasoning, undefined)
   assert.equal(invalid.plan?.designCheckReasoning, undefined)
 })
+
+test('case reports retain standalone cases, unresolved status and clarification provenance across reloads', () => {
+  const stored: Project = { ...empty, assessment: {
+    summary: '需要确认撤回边界。', recommendations: [],
+    caseAssessments: [{ caseId: 'C1', scenario: '申请 A 是否能撤回。', basis: '撤回规则待确认。',
+      status: 'clarify', elements: [], explanation: '业务未决。', gap: '未说明撤回条件。', suggestion: '请确认撤回条件。' }],
+    clarifications: [{ text: '何时可撤回？', basis: '撤回规则待确认。', basisSource: 'business-basis', ambiguity: '办理前或办理后。',
+      impact: '影响撤回前提。', options: ['办理前', '办理后'], multiple: false }],
+  } }
+  const restored = restoreProject(JSON.parse(JSON.stringify(stored)), empty)
+  assert.deepEqual(restored.assessment, stored.assessment)
+})
+
+test('legacy process assessments remain history rather than fabricated case results', () => {
+  const stored = { ...empty, assessment: {
+    summary: '旧报告结论。', recommendations: ['保留结果归属。'], clarifications: [], historicalQuestions: ['旧问题'],
+    processAssessments: [{ processId: 'review', processName: '审核', status: 'partial', reason: '规则不完整。',
+      evidence: [{ quote: '旧版引用' }], requirements: [{ requirement: '通过才办理', status: 'partial', elements: ['application'],
+        explanation: '已有申请对象。', gap: '缺少前提。', suggestion: '补充规则。', evidence: [] }] },
+      { processId: 'empty', processName: '未拆分计划', status: 'partial', reason: '仅有整体判断。', requirements: [] }],
+  } }
+  const restored = restoreProject(stored, empty)
+  assert.deepEqual(restored.assessment?.caseAssessments, [])
+  for (const preserved of ['审核', '通过才办理', 'application', '缺少前提。', '补充规则。', '旧版引用', '仅有整体判断。'])
+    assert.ok(restored.assessment?.historicalReport?.includes(preserved))
+  assert.equal(restored.assessment?.summary, '旧报告结论。')
+  assert.deepEqual(restored.assessment?.recommendations, ['保留结果归属。'])
+  assert.deepEqual(restored.assessment?.historicalQuestions, ['旧问题'])
+  assert.deepEqual(restoreProject(JSON.parse(JSON.stringify(restored)), empty).assessment, restored.assessment)
+})

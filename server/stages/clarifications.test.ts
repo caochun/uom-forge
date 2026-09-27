@@ -221,6 +221,26 @@ test('no clarification section means no questionnaire; design scope and subseque
   assert.match(JSON.stringify(context), /记录如何归属事项尚未确定/)
 })
 
+test('missing necessary business information can become an open question without invented alternatives', async () => {
+  const basis = '办理必须按额度分级审核，但分级阈值尚未提供。'
+  const draft = `## 建模判断与未决边界
+分级审核所需阈值未确定，不设默认值。
+## 需要补充的业务信息
+1. 额度分级审核采用什么阈值？
+依据：${basis}
+歧义：缺少决定分级审核分支所必需的额度阈值。
+影响：不能确定适用哪一审核分支。`
+  const result = await compileModel(draft, basis, async prompt => {
+    assert.doesNotMatch(prompt, /额度分级审核采用什么阈值/)
+    return JSON.stringify(model)
+  }, {}, basis)
+  assert.equal(result.clarifications.length, 1)
+  assert.equal(result.clarifications[0].basisSource, 'business-basis')
+  assert.deepEqual(result.clarifications[0].options, [])
+  assert.equal(result.clarifications[0].multiple, false)
+  assert.deepEqual(result.validation.warnings, [])
+})
+
 test('questions quoting a paraphrased business basis reach users and survive compilation retry with their actual source', async () => {
   const reading = '文档说明办理后留档，但一份档案对应的事项数量还没有说清。'
   const basis = '业务事项办理产生记录，记录可关联的事项数量未决。'

@@ -639,7 +639,7 @@ h4 {
 .support-overview .panel-subtitle { margin-top: 6px; }
 .support-filters {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 9px;
   padding: 0 22px 20px;
 }
@@ -660,6 +660,7 @@ h4 {
 .support-filter[aria-pressed='true'] { background: #eef4ff; border-color: #8faed6; box-shadow: inset 0 0 0 1px #8faed6; color: #315f9a; }
 .support-filter.partial strong { color: #a27125; }
 .support-filter.missing strong { color: #b36255; }
+.support-filter.clarify strong { color: #7861a1; }
 .support-process-list { display: flex; flex-direction: column; gap: 12px; }
 .support-process { overflow: hidden; }
 .support-process-heading { margin: 0; }
@@ -674,6 +675,9 @@ h4 {
 .support-status.supported { color: #406ba2; background: #edf4fc; }
 .support-status.partial { color: #976c24; background: #fbf3e3; }
 .support-status.missing { color: #a75d50; background: #fcefea; }
+.support-status.clarify { color: #7861a1; background: #f4effb; }
+.support-history { padding: 20px; }
+.support-need .narrative-body + h4 { margin-top: 18px; }
 .support-process-detail { border-top: 1px solid #e7edf4; }
 .support-process-caption { font-size: 11px; color: #8591a3; padding: 12px 22px; background: #fafbfd; }
 .support-requirement { display: grid; grid-template-columns: 1fr 1.35fr 1fr; border-top: 1px solid #e7edf4; }
@@ -762,7 +766,6 @@ h4 {
 .reasoning-stream {
   max-height: 240px;
   overflow: auto;
-  overscroll-behavior: contain;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   padding: 0 14px 14px;
@@ -788,7 +791,6 @@ h4 {
 .compilation-json {
   max-height: 360px;
   overflow: auto;
-  overscroll-behavior: contain;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   margin: 16px 20px;

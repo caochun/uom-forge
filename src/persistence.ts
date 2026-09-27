@@ -21,7 +21,7 @@ import { readDesignReview, interruptDesignReview } from '../shared/design-review
 const stages = ['understand', 'model', 'compile', 'narrate', 'assess'] as const
 const STAGE_PART_LABELS: Record<string, string> = {
   reading: '业务理解', basis: '建模依据', design: '模型设计',
-  'design-check': '设计检查', compile: '模型编译', narrate: '模型自述', assess: '业务情形检验',
+  'design-check': '设计检查', compile: '模型编译', narrate: '模型自述', assess: '业务案例检查',
 }
 const evidence = (value: unknown): Evidence[] =>
   records(value).map((item) => ({ quote: text(item.quote) }))
@@ -130,28 +130,49 @@ function readUnderstanding(value: unknown): Understanding | null {
     sources: readUnderstandingSources(value.sources, text(value.narrative)),
   }
 }
+// Preserve old process reports as history, without presenting requirements as newly checked cases.
+function historicalAssessment(value: Record<string, unknown>): string {
+  if (typeof value.historicalReport === 'string') return value.historicalReport
+  if (!Array.isArray(value.processAssessments)) return ''
+  const labels: Record<string, string> = { supported: '可支撑', partial: '部分支撑', missing: '存在缺口' }
+  const quotes = (items: unknown) => evidence(items).map(item => `旧版引用：${item.quote}`)
+  return records(value.processAssessments).map(item => [
+    `### ${text(item.processName, text(item.processId))}`,
+    `原编号：${text(item.processId)}`,
+    `原结论：${labels[text(item.status)] || '未记录'}`,
+    text(item.reason),
+    ...quotes(item.evidence),
+    ...records(item.requirements).flatMap(requirement => [
+      `业务要求：${text(requirement.requirement)}`,
+      `原结论：${labels[text(requirement.status)] || '未记录'}`,
+      text(requirement.explanation),
+      `模型元素：${strings(requirement.elements).join('、')}`,
+      `缺口：${text(requirement.gap)}`,
+      `建议：${text(requirement.suggestion)}`,
+      ...quotes(requirement.evidence),
+    ]),
+  ].filter(Boolean).join('\n\n')).join('\n\n') || '旧版报告未列出业务计划。'
+}
 function readAssessment(value: unknown): Assessment | null {
   if (!isRecord(value)) return null
   const status = (candidate: unknown): SupportStatus =>
-    candidate === 'supported' || candidate === 'missing' ? candidate : 'partial'
+    candidate === 'supported' || candidate === 'missing' || candidate === 'clarify' ? candidate : 'partial'
+  const historicalReport = historicalAssessment(value)
   return {
     summary: text(value.summary),
     recommendations: strings(value.recommendations),
     clarifications: records(value.clarifications).map((item): BusinessClarification => ({
       text: text(item.text), basis: text(item.basis), ambiguity: text(item.ambiguity),
       impact: text(item.impact), options: strings(item.options), multiple: item.multiple === true,
+      ...(item.basisSource === 'business-basis' ? { basisSource: 'business-basis' } : {}),
     })),
-    processAssessments: records(value.processAssessments).map((item) => ({
-      processId: text(item.processId), processName: text(item.processName),
-      status: status(item.status), reason: text(item.reason),
-      evidence: evidence(item.evidence),
-      requirements: records(item.requirements).map((requirement) => ({
-        requirement: text(requirement.requirement), status: status(requirement.status),
-        elements: strings(requirement.elements), explanation: text(requirement.explanation),
-        gap: text(requirement.gap), suggestion: text(requirement.suggestion),
-        evidence: evidence(requirement.evidence),
-      })),
+    caseAssessments: records(value.caseAssessments).map((item) => ({
+      caseId: text(item.caseId), scenario: text(item.scenario), basis: text(item.basis),
+      status: status(item.status), elements: strings(item.elements),
+      explanation: text(item.explanation), gap: text(item.gap), suggestion: text(item.suggestion),
     })),
+    ...(historicalReport ? { historicalReport } : {}),
+    ...(Array.isArray(value.historicalQuestions) ? { historicalQuestions: strings(value.historicalQuestions) } : {}),
   }
 }
 function readPlan(value: unknown): ModelDesign | null {

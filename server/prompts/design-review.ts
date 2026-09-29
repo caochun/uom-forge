@@ -12,8 +12,8 @@ ${businessContextPrompt(context)}
 ${CHECK_METHOD}
 
 修订复查：
-- 有历史设计或反馈时，沿用建模依据中的案例以及此前补充且有依据支持的案例，保留标识、上下文和预期；补充案例不能替换失败案例。重新检查受影响的案例，并回放其余案例，比较前后设计是否丢失已有约束、许可、例外或归属；不能因改动很小而跳过复查。
-- 历史依据有校正时，先核对校正是否有业务来源支持；受影响案例保留标识并说明预期为何改变，其余案例继续回放。旧的通过结论不能直接沿用。修正尚未完成时不能判为通过。
+- 有历史设计、反馈或依据校正时，保留已有案例、问题编号和预期；复查受影响案例并回放其余已知案例，不能用新案例替换失败案例或沿用旧的通过结论。
+- 来源能直接判定的依据错误写入 basis 问题；需要业务选择的歧义写入 business 问题。修正未完成时不能判为通过。
 
 ${DESIGN_CHECK_CONTRACT}
 固定业务验收清单（设计前从来源生成；保留全部问题及预期，不能从当前设计反推范围）：
@@ -24,4 +24,3 @@ ${JSON.stringify(businessBasis)}
 ${JSON.stringify(design)}
 ${rounds.length ? `上一版模型设计（用于比较修订前后的表达）：\n${JSON.stringify(rounds.at(-1)!.design)}\n先前检查反馈及所用依据版本（用于沿用案例和复查缺口，不是业务来源）：\n${JSON.stringify(rounds.map(round => ({ feedback: round.feedback, report: round.report, businessBasisVersion: round.businessBasisVersion, ...(round.businessBasis && round.businessBasis !== businessBasis ? { businessBasis: round.businessBasis } : {}) })))}` : ''}`
 }
-

@@ -1,7 +1,13 @@
 import { businessContextPrompt, type BusinessContext } from './business-context.ts'
 import type { DesignAcceptance } from '../../shared/design-acceptance.ts'
 import type { RunTurn, TurnOptions } from '../providers/types.ts'
-import { parseAcceptanceShape, parseDesignAcceptance, sourceContains } from '../validation/design-acceptance.ts'
+import {
+  canonicalizeAcceptanceSources,
+  parseAcceptanceShape,
+  parseDesignAcceptance,
+  sourceContains,
+  sourceQuoteForBlocks,
+} from '../validation/design-acceptance.ts'
 import { isRecord, parseJsonOutput } from '../validation/values.ts'
 
 export { designAcceptancePrompt, acceptanceQuoteRepairPrompt } from '../prompts/design-acceptance.ts'
@@ -11,22 +17,44 @@ import { designAcceptancePrompt, acceptanceQuoteRepairPrompt } from '../prompts/
 export async function prepareDesignAcceptance(context: BusinessContext, runTurn: RunTurn, options: TurnOptions, savedRaw?: string): Promise<DesignAcceptance> {
   const raw = savedRaw ?? await runTurn(designAcceptancePrompt(context), options)
   options.signal?.throwIfAborted()
-  const acceptance = parseAcceptanceShape(raw)
-  const invalid = acceptance.questions.filter(q => !sourceContains(context, q.sourceQuote))
-  if (!invalid.length) return acceptance
+  const draft = parseAcceptanceShape(raw)
+  const prepared = canonicalizeAcceptanceSources(context, draft)
+  if (!prepared.invalid.length) return parseDesignAcceptance(JSON.stringify(prepared.acceptance), context)
   options.onEvent?.({ type: 'phase', text: '业务验收问题已生成，正在核对引文的抄写差异。' })
-  const patches = parseJsonOutput(await runTurn(acceptanceQuoteRepairPrompt(context, invalid), options), '验收引文校正')
+  const patches = parseJsonOutput(await runTurn(acceptanceQuoteRepairPrompt(context, prepared.invalid), options), '验收引文校正')
   options.signal?.throwIfAborted()
-  if (!isRecord(patches) || Object.keys(patches).some(k => k !== 'quotes') || !Array.isArray(patches.quotes) || patches.quotes.length !== invalid.length)
-    throw new Error('验收引文校正必须只返回待校正编号及引文。')
-  const replacements = new Map<string, string>()
+  const invalidIds = new Set(prepared.invalid.map(q => q.id))
+  if (!isRecord(patches) || Object.keys(patches).some(k => k !== 'quotes') || !Array.isArray(patches.quotes) || patches.quotes.length !== prepared.invalid.length)
+    throw new Error(`验收引文校正必须恰好返回待校正编号：${[...invalidIds].join('、')}。`)
+  const replacements = new Map<string, { sourceQuote: string; sourceBlockIds?: string[] }>()
   for (const p of patches.quotes) {
-    if (!isRecord(p) || Object.keys(p).some(k => k !== 'id' && k !== 'sourceQuote') || typeof p.id !== 'string' ||
-      typeof p.sourceQuote !== 'string' || !invalid.some(q => q.id === p.id) || replacements.has(p.id) || !sourceContains(context, p.sourceQuote))
-      throw new Error('验收引文校正包含无效编号或无法定位的原句。')
-    replacements.set(p.id, p.sourceQuote)
+    if (!isRecord(p) || Object.keys(p).some(k => k !== 'id' && k !== 'sourceQuote' && k !== 'sourceBlockIds') ||
+      typeof p.id !== 'string' || !invalidIds.has(p.id) || replacements.has(p.id))
+      throw new Error(`验收引文校正包含无效编号：应校正 ${[...invalidIds].join('、')}。`)
+    const hasRefs = Object.hasOwn(p, 'sourceBlockIds')
+    const rawRefs = p.sourceBlockIds
+    if (hasRefs && (!Array.isArray(rawRefs) || !rawRefs.every(id => typeof id === 'string')))
+      throw new Error(`验收引文校正的来源块编号格式无效：${p.id}。`)
+    const refs = hasRefs ? (rawRefs as string[]).map(id => id.trim()).filter(Boolean) : undefined
+    const referencedQuote = sourceQuoteForBlocks(context, refs)
+    if (refs?.length && !referencedQuote)
+      throw new Error(`验收引文校正的来源块无法定位：${p.id}。`)
+    if (referencedQuote) {
+      replacements.set(p.id, { sourceQuote: referencedQuote, sourceBlockIds: refs })
+      continue
+    }
+    if (typeof p.sourceQuote !== 'string' || !sourceContains(context, p.sourceQuote))
+      throw new Error(`验收引文校正的原句无法定位：${p.id}。`)
+    replacements.set(p.id, { sourceQuote: p.sourceQuote })
   }
-  const corrected = { ...acceptance, questions: acceptance.questions.map(q => replacements.has(q.id) ? { ...q, sourceQuote: replacements.get(q.id)! } : q) }
+  if (replacements.size !== invalidIds.size)
+    throw new Error(`验收引文校正遗漏编号：${[...invalidIds].filter(id => !replacements.has(id)).join('、')}。`)
+  const corrected = {
+    ...prepared.acceptance,
+    questions: prepared.acceptance.questions.map(q => replacements.has(q.id)
+      ? { ...q, ...replacements.get(q.id)! }
+      : q),
+  }
   return parseDesignAcceptance(JSON.stringify(corrected), context)
 }
 

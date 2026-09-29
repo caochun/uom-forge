@@ -187,6 +187,8 @@ function App() {
   const abortRef = useRef<AbortController | null>(null)
   const cancelled = useRef(false)
   const projectRef = useRef(project)
+  const mainContentRef = useRef<HTMLElement | null>(null)
+  const followMainContent = useRef(true)
   const messagesRef = useRef<HTMLDivElement | null>(null)
   const followMessages = useRef(true)
   projectRef.current = project
@@ -270,7 +272,6 @@ function App() {
     if (followMessages.current && messagesRef.current)
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight
   }, [project.messages, discussing, assistantOpen])
-
   const execute = async (task: () => Promise<void>) => {
     if (busyRef.current) return
     if (!modelOptions) {
@@ -377,6 +378,8 @@ function App() {
       setAssessmentStream({ text: '', reasoning: '' })
     }
     if (stage === 'model') {
+      followMainContent.current = true
+      setModelMode('evidence')
       setProject((current) => ({
         ...current,
         plan: {
@@ -864,6 +867,13 @@ function App() {
     }
   }
   const modelRunning = job?.stage === 'model' || job?.stage === 'compile'
+  useEffect(() => {
+    if (!modelRunning || view !== 'model') return
+    const node = mainContentRef.current
+    if (followMainContent.current && node)
+      node.scrollTop = node.scrollHeight
+  }, [modelRunning, view, project.plan, modelActivity, job?.part, job?.text])
+
   const runPart = modelRunning
     ? job.part || (job.stage === 'compile' ? 'compile' : 'design')
     : undefined
@@ -1057,7 +1067,15 @@ function App() {
         </div>
       </header>
       <div className="app-body">
-        <main className="main-content">
+        <main
+          className="main-content"
+          ref={mainContentRef}
+          onScroll={(event) => {
+            const node = event.currentTarget
+            followMainContent.current =
+              node.scrollHeight - node.scrollTop - node.clientHeight < 80
+          }}
+        >
           <nav className="workspace-nav" aria-label="工作区">
             {PAGES.map(([id, label, Icon], index) => {
                   const old =

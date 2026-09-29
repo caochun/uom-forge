@@ -69,10 +69,13 @@ export async function runPiModeling(
   }
   const terminal = () => review.status === 'completed' || review.status === 'attention'
   // Structured review data is rendered after validation, never streamed as JSON into the design UI.
-  const reviewOptions = () => {
+  const reviewOptions = (streamReasoning = true) => {
     const scoped = scopedTurn({ ...options, signal: deadline.signal }, 'design-check')
     return { ...scoped, outputFormat: 'json' as const, onEvent: (event: Parameters<NonNullable<typeof scoped.onEvent>>[0]) => {
-      if (event.type !== 'delta' || event.reasoning) scoped.onEvent?.(event)
+      // Structured JSON is never streamed into the design view. The initial
+      // acceptance pass is a preparatory extraction, so keep its potentially
+      // lengthy private reasoning out of the user-visible design-check stream.
+      if (event.type !== 'delta' || (streamReasoning && event.reasoning)) scoped.onEvent?.(event)
     } }
   }
   const feedback = () => {
@@ -201,7 +204,7 @@ export async function runPiModeling(
     options.onEvent?.({ type: 'phase', part: 'design-check', text: designReviewLabel(review) })
     try {
       // Deliberately exclude currentModel and user expression feedback from this call.
-      acceptance = await prepareDesignAcceptance({ narrative: input.narrative, sources: input.sources }, runTurn, reviewOptions())
+      acceptance = await prepareDesignAcceptance({ narrative: input.narrative, sources: input.sources }, runTurn, reviewOptions(false))
       deadline.signal.throwIfAborted()
     } catch (error) {
       deadline.signal.throwIfAborted()

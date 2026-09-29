@@ -9,6 +9,9 @@ export interface DesignAcceptance {
     kind: 'result' | 'behavior' | 'boundary'
     grounding: 'explicit' | 'inferred' | 'unknown'
     sourceQuote: string
+    // Preferred machine-readable provenance. The server resolves these IDs
+    // to exact source text; optional for drafts created by older versions.
+    sourceBlockIds?: string[]
     reason: string
     expected: string
   }[]
@@ -47,8 +50,10 @@ const evidence = (v: unknown): v is DefinitionEvidence => record(v) && strings(v
 // Shared decoding checks shape only. Source, design and history checks run on the server.
 export function readDesignAcceptance(v: unknown): DesignAcceptance | undefined {
   if (!record(v) || !strings(v, ['scope', 'scenario', 'outcome']) || !Array.isArray(v.questions) || !v.questions.length ||
-    !v.questions.every(q => record(q) && strings(q, ['id', 'question', 'sourceQuote', 'reason', 'expected']) &&
-      member(q.kind, ['result', 'behavior', 'boundary']) && member(q.grounding, ['explicit', 'inferred', 'unknown']))) return undefined
+    !v.questions.every(q => record(q) && strings(q, ['id', 'question', 'reason', 'expected']) && typeof q.sourceQuote === 'string' &&
+      (!!q.sourceQuote.trim() || (Array.isArray(q.sourceBlockIds) && q.sourceBlockIds.length > 0)) &&
+      member(q.kind, ['result', 'behavior', 'boundary']) && member(q.grounding, ['explicit', 'inferred', 'unknown']) &&
+      (q.sourceBlockIds === undefined || (Array.isArray(q.sourceBlockIds) && q.sourceBlockIds.length > 0 && q.sourceBlockIds.every(id => typeof id === 'string' && !!id.trim()))))) return undefined
   return v as unknown as DesignAcceptance
 }
 

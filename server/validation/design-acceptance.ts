@@ -7,6 +7,63 @@ import { fromMarkdown } from 'mdast-util-from-markdown'
 const normalized = (text: string) => text.replace(/\s+/g, ' ').trim()
 const contains = (text: string, quote: string) => !!quote.trim() && normalized(text).includes(normalized(quote))
 
+type SourceEntry = { id: string; text: string }
+
+function sourceEntries(context: BusinessContext): SourceEntry[] {
+  const document = context.sources?.blocks || []
+  const entries = document.map((block) => ({ id: block.id, text: block.text }))
+  // Legacy drafts may not carry an original snapshot. Give narrative lines
+  // stable IDs so the same locator protocol still works in that case.
+  if (!document.length) {
+    entries.push(...context.narrative
+      .split(/\r?\n/)
+      .map((text, index) => ({ id: `narrative-${index + 1}`, text: text.trim() }))
+      .filter((entry) => entry.text))
+  }
+  return entries
+}
+
+export function sourceQuoteForBlocks(
+  context: BusinessContext,
+  ids: string[] | undefined,
+): string | undefined {
+  if (!ids?.length) return undefined
+  const entries = sourceEntries(context)
+  const byId = new Map(entries.map((entry) => [entry.id, entry.text]))
+  const texts = ids.map((id) => byId.get(id.trim()))
+  return texts.every((text): text is string => !!text && !!text.trim())
+    ? texts[0]
+    : undefined
+}
+
+export function canonicalizeAcceptanceSources(
+  context: BusinessContext,
+  acceptance: DesignAcceptance,
+): { acceptance: DesignAcceptance; invalid: DesignAcceptance['questions'] } {
+  const invalid: DesignAcceptance['questions'] = []
+  const questions = acceptance.questions.map((question) => {
+    const refs = question.sourceBlockIds?.map((id) => id.trim()).filter(Boolean)
+    const referencedQuote = sourceQuoteForBlocks(context, refs)
+    if (question.sourceBlockIds !== undefined) {
+      if (!referencedQuote) {
+        invalid.push(question)
+        return { ...question, sourceBlockIds: refs }
+      }
+      // The locator is authoritative. Replace any paraphrased or truncated
+      // quote with exact text copied from the source snapshot.
+      return { ...question, sourceBlockIds: refs, sourceQuote: referencedQuote }
+    }
+    if (!sourceContains(context, question.sourceQuote)) {
+      invalid.push(question)
+      return question
+    }
+    // Keep legacy quote-only drafts unchanged. New generations carry an
+    // explicit locator and are canonicalized above.
+    return question
+  })
+  return { acceptance: { ...acceptance, questions }, invalid }
+}
+
 // Accept a quotation of rendered Markdown without deleting literal operators,
 // negation or words. Only parsed emphasis/code delimiters and quote styles differ.
 function definitionQuoteText(text: string): string {
@@ -48,6 +105,8 @@ export function parseAcceptanceShape(raw: string): DesignAcceptance {
 export function parseDesignAcceptance(raw: string, context: BusinessContext): DesignAcceptance {
   const result = parseAcceptanceShape(raw)
   for (const q of result.questions) {
+    if (q.sourceBlockIds !== undefined && !sourceQuoteForBlocks(context, q.sourceBlockIds))
+      throw new Error(`验收问题 ${q.id} 的来源块编号无效。`)
     if (!sourceContains(context, q.sourceQuote)) throw new Error(`验收问题 ${q.id} 的引文不在业务来源中。`)
   }
   return result

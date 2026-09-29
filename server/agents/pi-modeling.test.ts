@@ -74,6 +74,7 @@ test('the acceptance call precedes design and cannot see the candidate or expres
       assert.ok(!prompt.includes('CANDIDATE_MARKER') && !prompt.includes('FEEDBACK_MARKER'))
       assert.ok(!prompt.includes(revised))
       assert.ok(!prompt.includes(prepared), 'source questions do not inherit the extracted basis')
+      options.onEvent?.({ type: 'delta', text: '验收准备阶段的内部思考', reasoning: true })
       preparedChecks = true
       return JSON.stringify(acceptance)
     }
@@ -85,6 +86,7 @@ test('the acceptance call precedes design and cannot see the candidate or expres
   assert.equal(result.designReview.acceptanceVersion, artifactVersion(acceptance))
   assert.equal(result.designReview.rounds[0].acceptanceVersion, artifactVersion(acceptance))
   assert.ok(events.some(e => e.type === 'design-review' && e.review.round === 0 && e.review.acceptance))
+  assert.ok(!events.some(e => e.type === 'delta' && e.text === '验收准备阶段的内部思考'), 'acceptance preparation reasoning stays out of the design stream')
 })
 
 test('an incomplete checklist stops before design and cancellation preserves the preparation state', async t => {

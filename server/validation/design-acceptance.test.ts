@@ -28,6 +28,36 @@ test('acceptance questions are source-grounded and IDs are unique, without domai
   assert.throws(() => parseDesignAcceptance(JSON.stringify({ ...acceptance, questions: [acceptance.questions[0], acceptance.questions[0]] }), context), /重复/)
 })
 
+test('source block locators replace paraphrased quotes with exact source text', async () => {
+  const sourceContext = {
+    narrative: '整理稿说明。',
+    sources: {
+      documentName: '业务文档', complete: true,
+      blocks: [{ id: 'B1', text: '原文明确记录成果。' }], citations: [],
+    },
+  }
+  const draft = {
+    ...acceptance,
+    questions: [{ ...acceptance.questions[0], sourceQuote: '', sourceBlockIds: ['B1'] }],
+  }
+  let calls = 0
+  const fixed = await prepareDesignAcceptance(sourceContext, async () => { calls++; return '{}' }, {}, JSON.stringify(draft))
+  assert.equal(calls, 0)
+  assert.equal(fixed.questions[0].sourceQuote, '原文明确记录成果。')
+
+  const needsRepair = {
+    ...acceptance,
+    questions: [{ ...acceptance.questions[0], sourceQuote: '成果会被记录。', sourceBlockIds: ['missing'] }],
+  }
+  const repaired = await prepareDesignAcceptance(sourceContext, async prompt => {
+    calls++
+    assert.ok(prompt.includes('B1'))
+    return JSON.stringify({ quotes: [{ id: 'value', sourceBlockIds: ['B1'] }] })
+  }, {}, JSON.stringify(needsRepair))
+  assert.equal(repaired.questions[0].sourceQuote, '原文明确记录成果。')
+  assert.deepEqual(repaired.questions[0].sourceBlockIds, ['B1'])
+})
+
 test('quote correction repairs only unmatched quotations and preserves every acceptance field', async () => {
   const draft = structuredClone(acceptance)
   draft.questions[0].sourceQuote = '事项形成成果，成果记录测量值。'

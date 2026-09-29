@@ -31,7 +31,6 @@ test('DeepSeek preserves split UTF-8, multiline SSE, reasoning and final untermi
       model: 'test-model',
       stream: true,
       thinking: { type: 'disabled' },
-      max_tokens: 16384,
       messages: [{ role: 'user', content: 'this turn only' }],
     })
     return new Response(stream)
@@ -86,12 +85,12 @@ test('DeepSeek user cancellation remains AbortError and closes the stream', asyn
   assert.equal(closed, true)
 })
 
-test('structured turns request JSON output and honor a configurable token ceiling', async () => {
+test('structured turns request JSON output without an application token ceiling', async () => {
   const provider = createDeepSeekProvider(
     async (_url, init) => {
       const request = JSON.parse(String(init?.body))
       assert.deepEqual(request.response_format, { type: 'json_object' })
-      assert.equal(request.max_tokens, 12000)
+      assert.equal(request.max_tokens, undefined)
       assert.deepEqual(request.thinking, { type: 'disabled' })
       return new Response(
         'data: {"choices":[{"delta":{"content":"{}"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
@@ -100,15 +99,7 @@ test('structured turns request JSON output and honor a configurable token ceilin
     { ...env, LLM_MAX_OUTPUT_TOKENS: '12000' },
   )
   assert.equal(await provider('return JSON', { outputFormat: 'json' }), '{}')
-  await assert.rejects(
-    createDeepSeekProvider(
-      async () => {
-        throw new Error('must not fetch')
-      },
-      { ...env, LLM_MAX_OUTPUT_TOKENS: 'invalid' },
-    )('JSON', {}),
-    /正整数/,
-  )
+  // Legacy configuration is ignored; the request still omits max_tokens.
 })
 
 test('DeepSeek timeouts stop a stalled stream; errors and partial output are not successes', async () => {
@@ -130,7 +121,7 @@ test('DeepSeek timeouts stop a stalled stream; errors and partial output are not
     [new Response('unavailable', { status: 503 }), /503/],
     [
       new Response('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'),
-      /提前结束/,
+      /上游连接中断.*INCOMPLETE_STREAM/,
     ],
     [
       new Response('data: {"error":{"message":"upstream failure"}}\n\n'),
@@ -139,7 +130,7 @@ test('DeepSeek timeouts stop a stalled stream; errors and partial output are not
   ]
   for (const [response, expected] of cases)
     await assert.rejects(
-      createDeepSeekProvider(async () => response, env)('input', {}),
+      createDeepSeekProvider(async () => response.clone(), { ...env, LLM_API_TIMEOUT_MS: '0' })('input', {}),
       expected,
     )
 })

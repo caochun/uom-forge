@@ -1,11 +1,11 @@
 import { normalizeSectionHeadings } from './markdown-sections.ts'
 import { validateDocument } from '../validation/document.ts'
-import { understandingPrompt } from './prompts.ts'
+import { understandingPrompt } from '../prompts/understanding.ts'
 import type { BusinessDocument, Understanding } from '../../shared/analysis.ts'
 import type { StageOptions } from './contracts.ts'
 
 import { extractQuestions } from '../../shared/questions.ts'
-import { runPiText } from '../agents/pi-text.ts'
+import { runPiText } from '../llm/pi/text-agent.ts'
 import { extractUnderstandingSources } from '../../shared/understanding-sources.ts'
 
 export async function readBusiness(

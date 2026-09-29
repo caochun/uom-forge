@@ -1,11 +1,34 @@
 import type { Agent, StreamFn } from '@earendil-works/pi-agent-core'
-import { createAssistantMessageEventStream, type Model } from '@earendil-works/pi-ai'
+import type { AssistantMessage, AssistantMessageEvent, Model } from '@earendil-works/pi-ai'
+import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream'
 import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions'
 import type { ProviderId } from '../../shared/analysis.ts'
 import { requireModelProviderConfig } from './model-config.ts'
-import { glmGenerationOptions } from './glm.ts'
+import { configureGlmDns, glmGenerationOptions } from './glm.ts'
 import { selectedReasoning } from './reasoning.ts'
 import type { ReasoningEffort } from '../../shared/reasoning.ts'
+import { connectionFailure, exhaustedConnectionMessage, MAX_STREAM_RETRIES, retryNotice, transportFetch, waitToRetry, type StreamReset } from '../llm/transport/upstream-retry.ts'
+
+// Deliver resets in stream order, after all old deltas have been consumed.
+// The internal marker never reaches Pi: a second start would add a second
+// assistant message and incorrectly increment the design review round.
+class RecoveringAssistantStream extends AssistantMessageEventStream {
+  private resets = new WeakMap<AssistantMessageEvent, StreamReset>()
+  constructor(private onReset?: (event: StreamReset) => void) { super() }
+  reset(partial: AssistantMessage, notice: StreamReset) {
+    const marker: AssistantMessageEvent = { type: 'start', partial }
+    this.resets.set(marker, notice)
+    this.push(marker)
+  }
+  override async *[Symbol.asyncIterator]() {
+    const iterator = super[Symbol.asyncIterator]()
+    for await (const event of { [Symbol.asyncIterator]: () => iterator }) {
+      const reset = this.resets.get(event)
+      if (reset) this.onReset?.(reset)
+      else yield event
+    }
+  }
+}
 
 /** Shared by business understanding, model design and JSON repair. */
 export function createPiModel(
@@ -16,6 +39,10 @@ export function createPiModel(
   const config = requireModelProviderConfig(provider, env)
   const selected = selectedReasoning(provider, reasoningEffort, env)
   const glm = provider === 'glm' ? glmGenerationOptions(selected.effort ? { ...env, GLM_REASONING_EFFORT: selected.effort } : env) : undefined
+  // pi-ai requires a numeric model ceiling for its internal thinking-budget
+  // calculation. It is metadata only; createPiStream uses a zero sentinel
+  // below so no max_tokens field is sent to the upstream API.
+  const modelContextWindow = glm ? 1048576 : 128000
   return {
     id: config.model,
     name: config.model,
@@ -25,8 +52,8 @@ export function createPiModel(
     reasoning: !!glm || !!selected.effort,
     input: ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: glm ? 1048576 : 128000,
-    maxTokens: glm?.maxTokens || 24000,
+    contextWindow: modelContextWindow,
+    maxTokens: modelContextWindow,
     ...(glm ? {
       compat: {
         supportsStore: false,
@@ -54,11 +81,14 @@ export function createPiStream(
   requireTool: () => boolean,
   env: NodeJS.ProcessEnv = process.env,
   reasoningEffort?: ReasoningEffort,
+  onReset?: (event: StreamReset) => void,
 ): StreamFn {
   const config = requireModelProviderConfig(provider, env)
+  if (provider === 'glm') configureGlmDns(env)
   const selected = selectedReasoning(provider, reasoningEffort, env)
   const glm = provider === 'glm' ? glmGenerationOptions(selected.effort ? { ...env, GLM_REASONING_EFFORT: selected.effort } : env) : undefined
   return (model, context, options) => {
+    let transportCode: string | undefined
     const streamOptions = {
       ...options,
       // Exact vendor values are applied below after the SDK's generic level map.
@@ -73,47 +103,65 @@ export function createPiStream(
         ...selected.parameters,
       },
       apiKey: config.apiKey,
-      maxTokens: glm?.maxTokens || 24000,
+      // The SDK also wraps failures before headers as "Connection error.".
+      fetch: transportFetch(options?.fetch || globalThis.fetch, code => { transportCode = code }),
+      maxRetries: 0,
+      // pi-ai otherwise copies model.maxTokens into the request. Zero is
+      // treated as an omitted optional value by its OpenAI adapter while the
+      // model metadata above remains available for reasoning-budget math.
+      maxTokens: 0,
     }
-    const create = () => streamSimple(model as Model<'openai-completions'>, context, streamOptions)
-    // A transient upstream connection close is reported by undici as the bare
-    // message "terminated". Retry only when it happens before any assistant
-    // content, so a retry cannot duplicate already streamed text or tool calls.
-    const result = createAssistantMessageEventStream()
+    // Retry only this unfinished assistant turn, from the original messages.
+    // Pi executes tools only after the terminal success event; failed partial
+    // tool calls are discarded and previously completed tools are not replayed.
+    const original = { ...context, messages: structuredClone(context.messages) }
+    const create = () => streamSimple(model as Model<'openai-completions'>, original, streamOptions)
+    const result = new RecoveringAssistantStream(onReset)
     void (async () => {
       let retries = 0
-      for (;;) {
-        const upstream = create()
-        let start: Parameters<typeof result.push>[0] | undefined
-        let emittedContent = false
-        for await (const event of upstream) {
-          if (event.type === 'start') {
-            start = event
-            continue
+      let started = false
+      const empty: AssistantMessage = {
+        role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
+        timestamp: Date.now(), stopReason: 'error',
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      }
+      try {
+        for (;;) {
+          options?.signal?.throwIfAborted()
+          transportCode = undefined
+          const attemptStarted = performance.now()
+          let retry = false
+          for await (const event of create()) {
+            if (event.type === 'start') {
+              if (!started) { result.push(event); started = true }
+              continue
+            }
+            if (event.type === 'error' && event.reason !== 'aborted' && !options?.signal?.aborted) {
+              const code = transportCode || connectionFailure(event.error.errorMessage)
+              if (code) {
+                console.warn('[upstream-stream]', { provider, code, attempt: retries + 1, elapsedMs: Math.round(performance.now() - attemptStarted), retrying: retries < MAX_STREAM_RETRIES })
+                if (retries < MAX_STREAM_RETRIES) {
+                  retries++
+                  result.reset(empty, retryNotice(config.label, retries))
+                  await waitToRetry(retries, options?.signal)
+                  retry = true
+                  break
+                }
+                event.error.errorMessage = exhaustedConnectionMessage(code, retries)
+              }
+            }
+            result.push(event)
+            if (event.type === 'done' || event.type === 'error') return
           }
-          const isContent = event.type === 'text_start' || event.type === 'text_delta' || event.type === 'text_end' ||
-            event.type === 'thinking_start' || event.type === 'thinking_delta' || event.type === 'thinking_end' ||
-            event.type === 'toolcall_start' || event.type === 'toolcall_delta' || event.type === 'toolcall_end'
-          if (isContent) emittedContent = true
-          if (event.type === 'error' && !emittedContent && retries < 1 && !options?.signal?.aborted && /\bterminated\b/i.test(event.error.errorMessage || '')) {
-            retries++
-            start = undefined
-            break
-          }
-          if (start) {
-            result.push(start)
-            start = undefined
-          }
-          result.push(event)
-          if (event.type === 'done' || event.type === 'error') {
-            result.end()
-            return
-          }
+          if (!retry) throw new Error('推理流未返回结束事件。')
         }
-        if (start) result.push(start)
-        if (retries > 0 && !emittedContent) continue
+      } catch (error) {
+        const reason = options?.signal?.aborted ? 'aborted' : 'error'
+        result.push({ type: 'error', reason, error: { ...empty, stopReason: reason,
+          errorMessage: (error instanceof Error ? error.message : String(error)).replaceAll(config.apiKey!, '[redacted]') } })
+      } finally {
         result.end()
-        return
       }
     })()
     return result

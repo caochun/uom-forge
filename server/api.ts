@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AnalysisEvent, DiscussionEvent } from '../shared/analysis.ts'
 import { PROVIDERS } from '../shared/analysis.ts'
 import type { RunTurn } from './providers/types.ts'
-import { runProviderTurn, resolveProvider } from './providers/index.ts'
+import { runProviderTurn, resolveProvider } from './llm/providers/registry.ts'
 import { runStage } from './stages/index.ts'
 import { discuss } from './stages/discussion.ts'
 import {
@@ -103,6 +103,7 @@ export function createApiMiddleware(
             reasoningEffort: input.reasoningEffort,
             signal: controller.signal,
             onEvent: discussionStreaming ? event => {
+              if (event.type === 'reset') emitDiscussion(event)
               if (event.type === 'delta')
                 emitDiscussion({ type: 'delta', text: event.text, ...(event.reasoning ? { reasoning: true } : {}) })
             } : undefined,

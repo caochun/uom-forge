@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "docs:prompts": "tsx scripts/export-runtime-prompts.ts",
     "test:ui": "tsx scripts/check-modeling-ui.ts",
-    "test": "tsx --test server/*.test.ts server/*/*.test.ts src/*.test.ts",
+    "test": "tsx --test server/*.test.ts server/*/*.test.ts src/*.test.ts src/features/modeling/*.test.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {
@@ -22,6 +22,7 @@
     "elkjs": "^0.12.0",
     "lucide-react": "latest",
     "mammoth": "latest",
+    "mdast-util-from-markdown": "^2.0.3",
     "qq-doc-clone": "file:src/components/evidence/qq-doc-clone",
     "react": "latest",
     "react-dom": "latest",

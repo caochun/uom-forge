@@ -9,7 +9,16 @@ import { validateDocument, requireText } from './document.ts'
 import { isRecord } from './values.ts'
 import { parseCandidateModel } from './model.ts'
 import { readDesignReview } from '../../shared/design-review.ts'
+import { readUnderstandingSources } from '../../shared/understanding-sources.ts'
 import { parseReasoningEffort } from '../providers/reasoning.ts'
+
+function parseSources(value: unknown, narrative: string) {
+  if (value === undefined) return undefined
+  const sources = readUnderstandingSources(value, narrative)
+  if (!sources) throw new Error('业务来源格式无效。')
+  if (sources.complete || sources.blocks.length) validateDocument({ name: sources.documentName, blocks: sources.blocks })
+  return sources
+}
 
 export function parseAnalysisRequest(
   input: unknown,
@@ -39,6 +48,7 @@ export function parseAnalysisRequest(
         ...selection,
         stage: 'model',
         narrative: input.narrative,
+        sources: parseSources(input.sources, input.narrative),
         model: input.model,
         instruction: input.instruction,
       }
@@ -55,6 +65,7 @@ export function parseAnalysisRequest(
         ...(input.designReview !== undefined ? { designReview: readDesignReview(input.designReview) } : {}),
         ...(typeof input.businessBasis === 'string' ? { businessBasis: input.businessBasis } : {}),
         narrative: input.narrative,
+        sources: parseSources(input.sources, input.narrative),
       }
     case 'narrate':
       return {

@@ -7,6 +7,8 @@ import { businessBasisPrompt, compileModelPrompt, modelDesignPrompt, understandi
 import type { CandidateModel } from '../../shared/model.ts'
 import type { StageEvent } from '../../shared/analysis.ts'
 import { testAgents } from '../testing/agents.ts'
+import { artifactVersion } from '../../shared/workflow.ts'
+import { businessContextVersion } from './business-context.ts'
 
 const plan = '## 模型概述\n跟踪事项与成果。\n## 对象及边界\n事项 req；成果 result。\n## 关系\n事项通过产出关系 produces 指向成果。'
 const candidate = (): CandidateModel => ({
@@ -21,7 +23,48 @@ const candidate = (): CandidateModel => ({
   boundaries: [],
 })
 
-test('the four-stage pipeline passes text artifacts forward and validates only final JSON', async () => {
+test('the corrected basis is returned and used to validate final design clarifications', async () => {
+  const before = '旧依据：事项办理。'
+  const after = '新依据：成果可能需要复核。'
+  const finalPlan = `${plan}\n\n## 需要补充的业务信息\n1. 成果何时需要复核？\n依据：${after}\n歧义：复核条件未知。\n影响：无法确定复核前提。`
+  const result = await buildModel({ narrative: '事项形成成果。' }, async prompt => {
+    assert.match(prompt, /事项 req/)
+    assert.doesNotMatch(prompt, /成果何时需要复核/)
+    return JSON.stringify(candidate())
+  }, { agents: {
+    text: async () => before,
+    modeling: async (_input, _run, _options, basis) => {
+      assert.equal(basis, before)
+      return { modelDesign: finalPlan, businessBasis: after, designReview: { status: 'attention', reason: 'clarify', round: 2, rounds: [] } }
+    },
+  } })
+  assert.equal(result.businessBasis, after)
+  assert.equal(result.clarifications[0]?.basisSource, 'business-basis')
+  assert.equal(result.clarifications[0]?.basis, after)
+})
+
+test('compilation retry cannot reuse a review tied to a different original source snapshot', async () => {
+  const narrative = '事项形成成果。'
+  const sources = { documentName: '业务', complete: true, blocks: [{ id: '1', text: narrative }], citations: [] }
+  const review = { status: 'completed' as const, reason: 'sufficient' as const, round: 1, rounds: [],
+    planVersion: artifactVersion(plan), narrativeVersion: artifactVersion(narrative),
+    businessBasisVersion: artifactVersion(narrative), sourceVersion: businessContextVersion({ narrative, sources }) }
+  const unchanged = await compileModel(plan, narrative, async () => JSON.stringify(candidate()), {}, narrative, review, sources)
+  assert.deepEqual(unchanged.designReview, review)
+  const changed = await compileModel(plan, narrative, async () => JSON.stringify(candidate()), {}, narrative, review,
+    { ...sources, blocks: [{ id: '1', text: '事项只能形成一份成果。' }] })
+  assert.equal(changed.designReview, undefined)
+  const acceptance = { scope: '成果归属', scenario: '假设两次事项分别产生各自成果。', outcome: '每份成果可明确归属产生它的事项。', questions: [{ id: 'Q1', question: '成果属于谁？', kind: 'result' as const,
+    grounding: 'explicit' as const, sourceQuote: narrative, reason: '来源描述产生关系。', expected: '成果关联产生事项。' }] }
+  const withChecklist = { ...review, acceptance, acceptanceVersion: artifactVersion(acceptance) }
+  const matched = await compileModel(plan, narrative, async () => JSON.stringify(candidate()), {}, narrative, withChecklist, sources)
+  assert.deepEqual(matched.designReview, withChecklist)
+  const altered = { ...withChecklist, acceptance: { ...acceptance, scope: '已改动的验收范围' } }
+  const stale = await compileModel(plan, narrative, async () => JSON.stringify(candidate()), {}, narrative, altered, sources)
+  assert.equal(stale.designReview, undefined, 'a modified checklist cannot retain an old pass')
+})
+
+test('the modeling pipeline passes text artifacts through the injected agent and validates compiled JSON', async () => {
   const events: StageEvent[] = []
   const basis = '建模依据：事项形成成果，成果属于该事项。'
   const runTurn = async (prompt: string, options: Parameters<import('../providers/types.ts').RunTurn>[1]) => {
@@ -59,7 +102,7 @@ test('compiler uses a dedicated repair with the original design, error and previ
       assert.doesNotMatch(prompt, /编译目标：/)
       assert.ok(prompt.includes(JSON.stringify(plan)))
       assert.ok(prompt.includes(JSON.stringify('not json')))
-      assert.match(prompt, /校验错误（数据）/)
+      assert.match(prompt, /校验错误（用于定位结构、字段或引用问题）/)
     }
     return calls === 1 ? 'not json' : JSON.stringify(candidate())
   })
@@ -122,7 +165,7 @@ test('text stages retain their distinct responsibilities', () => {
   assert.match(basis, /已知业务计划或流程是模型设计需要支持的已知业务内容/)
   assert.match(basis, /初始上下文、目标或触发条件/)
   assert.match(basis, /业务案例是从已列出的事实、规则或已知业务计划中抽出的具体业务实例/)
-  assert.match(basis, /业务文档整理稿/)
+  assert.match(basis, /当前保存的业务整理稿/)
   const design = modelDesignPrompt({ feedback: '' }, basis)
   assert.match(design, /模型设计阶段/)
   assert.doesNotMatch(design, /第二阶段 A/)

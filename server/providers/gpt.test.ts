@@ -73,7 +73,6 @@ test('GPT resolves configuration per call, isolates provider parameters and emit
       model: 'configured-deepseek',
       stream: true,
       thinking: { type: 'disabled' },
-      max_tokens: 16384,
       messages: [{ role: 'user', content: 'third turn' }],
     },
   })
@@ -109,7 +108,6 @@ test('Qwen resolves its independent OpenAI-compatible configuration', async () =
     body: {
       model: 'configured-qwen',
       stream: true,
-      max_tokens: 16384,
       messages: [{ role: 'user', content: 'qwen turn' }],
     },
   })
@@ -141,7 +139,7 @@ test('GPT rejects upstream errors, incomplete streams, invalid JSON, token limit
     [
       () =>
         new Response('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'),
-      /GPT 连接提前结束/,
+      /GPT.*上游连接中断.*INCOMPLETE_STREAM/,
     ],
     [
       () => new Response('data: {"error":{"message":"upstream failed"}}\n\n'),
@@ -160,7 +158,7 @@ test('GPT rejects upstream errors, incomplete streams, invalid JSON, token limit
   for (const [response, expected] of cases) {
     const events: ProviderEvent[] = []
     await assert.rejects(
-      createGptProvider(async () => response(), env)('input', {
+      createGptProvider(async () => response(), { ...env, GPT_API_TIMEOUT_MS: '0' })('input', {
         onEvent: (event) => events.push(event),
       }),
       expected,

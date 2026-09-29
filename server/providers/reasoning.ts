@@ -8,21 +8,26 @@ export function modelReasoningOptions(provider: ProviderId, env: NodeJS.ProcessE
   const { model } = modelProviderConfig(provider, env)
   const id = model.toLowerCase()
   let efforts: ReasoningEffort[] = ['default']
+  let defaultEffort: ReasoningEffort = 'default'
   let description = '尚未确认此模型的可调档位，沿用服务配置。'
   if (provider === 'glm' && /^glm-5\.3(?:$|-)/.test(id)) {
     efforts = ['low', 'high', 'max']
+    defaultEffort = 'high'
     description = 'GLM 5.3 系列始终开启思考，可选择低、高、最高。'
   } else if (provider === 'gpt' && id === 'gpt-6-astra') {
     efforts = ['low', 'medium', 'high', 'xhigh', 'max']
+    defaultEffort = 'medium'
     description = '当前 GPT 网关确认支持这五档，此模型不支持关闭思考。'
   } else if (provider === 'deepseek' && /^deepseek-(flash|pro)(?:$|-)/.test(id)) {
     efforts = ['none', 'low', 'high', 'max']
+    defaultEffort = 'high'
     description = '可关闭思考；开启后支持低、高、最高三档。'
   } else if (provider === 'qwen' && /^qwen3\.6(?:$|-)/.test(id)) {
     efforts = ['none', 'enabled']
+    defaultEffort = 'enabled'
     description = '支持关闭或开启思考，没有 low/high 等固定强度档位。'
   }
-  return { model, efforts, defaultEffort: efforts[0], description }
+  return { model, efforts, defaultEffort, description }
 }
 
 export function publicModelOptions(env: NodeJS.ProcessEnv = process.env): ModelOptions {

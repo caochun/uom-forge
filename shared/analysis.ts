@@ -52,6 +52,8 @@ export interface Understanding {
 }
 export interface UnderstandingSources {
   documentName: string
+  // Legacy snapshots may contain only cited blocks; never claim full coverage then.
+  complete?: boolean
   // Original block snapshots: quotes are copied by the program, never by the LLM.
   blocks: BusinessDocument['blocks']
   citations: {
@@ -72,8 +74,9 @@ export interface DiscussionContext {
   review?: string
 }
 export interface ModelingInput {
-  // Reviewed document text. Only basis preparation reads it; design/review use businessBasis.
+  // Saved understanding, with original blocks and saved edits available for cross-checking.
   narrative: string
+  sources?: UnderstandingSources
   currentModel?: unknown
   // Expression feedback cannot introduce business facts; update narrative first.
   feedback?: string
@@ -114,6 +117,8 @@ export interface TurnTiming {
 }
 export type ProviderEvent =
   | { type: 'phase'; text: string }
+  // Discard only the current generation's provisional text/reasoning.
+  | { type: 'reset'; text: string }
   | { type: 'delta'; text: string; reasoning?: boolean; size?: number }
   | { type: 'timing'; timing: TurnTiming }
 export type StagePart =
@@ -127,18 +132,19 @@ export type StageEvent =
       clarifications: BusinessClarification[]
       warnings: string[]
     }
-  | { type: 'business-basis'; part: 'basis'; text: string }
+  | { type: 'business-basis'; part: 'basis'; text: string; revised?: boolean }
   | { type: 'design-review'; part: 'design'; review: DesignReview; modelDesign?: string }
   | ({ type: 'understanding-narrative' } & Understanding)
 export type AnalysisRequest = { provider: ProviderId; reasoningEffort?: ReasoningEffort } & (
   | { stage: 'understand'; document: BusinessDocument }
-  | { stage: 'model'; narrative: string; model?: unknown; instruction?: string }
+  | { stage: 'model'; narrative: string; sources?: UnderstandingSources; model?: unknown; instruction?: string }
   | {
       stage: 'compile'
       modelDesign: string
       businessBasis?: string
       designReview?: DesignReview
       narrative: string
+      sources?: UnderstandingSources
     }
   | { stage: 'narrate'; model: CandidateModel }
   | { stage: 'assess'; model: CandidateModel; businessBasis: string }
@@ -164,6 +170,7 @@ export type AnalysisEvent =
   | { type: 'error'; error: string }
 
 export type DiscussionEvent =
+  | { type: 'reset'; text: string }
   | { type: 'delta'; text: string; reasoning?: boolean }
   | { type: 'result'; text: string }
   | { type: 'error'; error: string }

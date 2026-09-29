@@ -14,6 +14,7 @@ export function parseAnalysisEvent(value: unknown): AnalysisEvent {
   if (!isRecord(value)) throw new Error('分析服务返回了无效事件')
   switch (value.type) {
     case 'phase':
+    case 'reset':
     case 'delta':
       if (typeof value.text === 'string') return value as AnalysisEvent
       break
@@ -52,6 +53,8 @@ export function parseAnalysisEvent(value: unknown): AnalysisEvent {
 
 export function parseDiscussionEvent(value: unknown): DiscussionEvent {
   if (!isRecord(value)) throw new Error('讨论服务返回了无效事件')
+  if (value.type === 'reset' && typeof value.text === 'string')
+    return { type: 'reset', text: value.text }
   if (value.type === 'delta' && typeof value.text === 'string')
     return { type: 'delta', text: value.text, ...(value.reasoning === true ? { reasoning: true } : {}) }
   if (value.type === 'result' && typeof value.text === 'string')

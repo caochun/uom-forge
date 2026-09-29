@@ -10,6 +10,7 @@ import type { RunTurn } from '../server/providers/types.ts'
 import type { StageOptions } from '../server/stages/contracts.ts'
 import { isRecord } from '../server/validation/values.ts'
 import { requireText } from '../server/validation/document.ts'
+import { parseAnalysisRequest } from '../server/validation/requests.ts'
 
 const projectRoot = path.resolve(import.meta.dirname, '..')
 for (const [key, value] of Object.entries(
@@ -51,10 +52,13 @@ if (values.input) {
   requireText(value.narrative, '业务说明')
   if (value.feedback !== undefined && typeof value.feedback !== 'string')
     throw new Error('Feedback must be text.')
+  const parsed = parseAnalysisRequest({ stage: 'model', narrative: value.narrative, sources: value.sources }, provider)
+  if (parsed.stage !== 'model') throw new Error('Expected modeling input.')
   input = {
     narrative: value.narrative,
     feedback: value.feedback,
     currentModel: value.currentModel,
+    sources: parsed.sources,
   }
 }
 const output = await mkdtemp(path.join(tmpdir(), 'forge-modeling-'))

@@ -16,6 +16,19 @@ const document = {
   ],
 }
 
+test('full source snapshots preserve uncited blocks through saved edits and restoration', () => {
+  const original = extractUnderstandingSources('客户下单。 [[source:block-1]]', document)
+  assert.equal(original.sources.complete, true)
+  assert.deepEqual(original.sources.blocks, document.blocks)
+  const revised = reviseUnderstandingSources(original.sources, original.narrative, '主管可以撤销。')
+  const restored = readUnderstandingSources(JSON.parse(JSON.stringify(revised)), '主管可以撤销。')!
+  assert.equal(restored.complete, true)
+  assert.deepEqual(restored.blocks, document.blocks)
+  assert.equal(restored.citations[0].origin, 'user')
+  const legacy = { ...restored, complete: undefined, blocks: [document.blocks[0]] }
+  assert.equal(readUnderstandingSources(legacy, '主管可以撤销。')?.complete, undefined)
+})
+
 test('citations keep program-copied original blocks separately from the clean explanation', () => {
   const result = extractUnderstandingSources(
     '## 流程\n\n客户可以下单。 [[source:block-1]]\n审核存在不同结果。 [[source:block-1,block-2]]',

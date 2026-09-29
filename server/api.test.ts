@@ -57,9 +57,33 @@ test('HTTP and SSE reject malformed inputs before invoking inference', async () 
     })
     assert.ok(events(await bad.text()).some((event) => event.type === 'error'))
     assert.equal(calls, 0)
+    assert.equal((await post(url + '/api/analyze', { stage: 'model', narrative: '正文', sources: { blocks: [] } })).status, 400)
+    assert.equal(calls, 0)
   } finally {
     await close(server)
   }
+})
+
+test('model API forwards full source snapshots and saved edits to basis preparation and Pi', async () => {
+  const narrative = '用户明确允许重复登记。'
+  const sources = { documentName: '规则', complete: true, blocks: [{ id: '1', text: '原文没有明确重复次数。' }, { id: '2', text: '结果属于申请。' }],
+    citations: [{ passage: narrative, origin: 'user' as const, blockIds: [] }] }
+  let seenBasis = false
+  let seenDesign = false
+  const { server, url } = await serve(async () => JSON.stringify({ schemaVersion: '1', name: '申请', summary: '申请产生结果。', objects: [], relations: [], actions: [], functions: [], rules: [], boundaries: [] }), {
+    text: async prompt => { seenBasis = prompt.includes(JSON.stringify(sources.blocks)) && prompt.includes(JSON.stringify(sources.citations)); return narrative },
+    modeling: async input => {
+      seenDesign = true
+      assert.deepEqual(input.sources, sources)
+      return { modelDesign: '申请与结果。', designReview: { status: 'completed', reason: 'sufficient', round: 1, rounds: [] } }
+    },
+  })
+  try {
+    const response = await post(url + '/api/analyze/stream', { stage: 'model', narrative, sources })
+    const output = events(await response.text())
+    assert.equal(output.at(-1)?.type, 'result')
+    assert.ok(seenBasis && seenDesign)
+  } finally { await close(server) }
 })
 
 test('reading emits SSE to completion; a consumed request body does not cancel inference', async () => {

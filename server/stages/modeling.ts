@@ -1,8 +1,8 @@
 import { normalizeModelPlan } from './markdown-sections.ts'
 import { validateCompiledModel } from '../validation/compiled-model.ts'
 import { requireText } from '../validation/document.ts'
-import { compileModelPrompt, compileModelRepairPrompt } from './prompts.ts'
-import type { ModelingInput, ModelingResult } from '../../shared/analysis.ts'
+import { compileModelPrompt, compileModelRepairPrompt } from '../prompts/compilation.ts'
+import type { ModelingInput, ModelingResult, UnderstandingSources } from '../../shared/analysis.ts'
 import type { RunTurn } from '../providers/types.ts'
 import { scopedTurn, type StageOptions } from './contracts.ts'
 import {
@@ -10,10 +10,11 @@ import {
   reviewModelClarifications,
   type ClarificationReview,
 } from '../../shared/clarifications.ts'
-import { runPiModeling } from '../agents/pi-modeling.ts'
+import { runPiModeling } from '../modeling/workflow.ts'
 import { prepareBusinessBasis } from './business-basis.ts'
 import { artifactVersion } from '../../shared/workflow.ts'
 import type { DesignReview } from '../../shared/design-review.ts'
+import { businessContextVersion } from './business-context.ts'
 
 export async function buildModel(
   input: ModelingInput,
@@ -23,7 +24,7 @@ export async function buildModel(
   requireText(input.narrative, '业务说明')
   const report = options.onEvent || (() => {})
   options.signal?.throwIfAborted()
-  const businessBasis = await prepareBusinessBasis(input.narrative, options)
+  let businessBasis = await prepareBusinessBasis(input.narrative, options, input.sources)
   options.signal?.throwIfAborted()
   report({ type: 'phase', part: 'design', text: '正在生成模型设计。' })
   let modelDesign: string
@@ -31,6 +32,7 @@ export async function buildModel(
   const designed = await (options.agents?.modeling || runPiModeling)(input, runTurn, options, businessBasis)
   modelDesign = designed.modelDesign
   designReview = designed.designReview
+  businessBasis = designed.businessBasis ?? businessBasis
   options.signal?.throwIfAborted()
   if (!modelDesign.trim()) throw new Error('未返回建模说明。')
   modelDesign = normalizeModelPlan(modelDesign)
@@ -47,7 +49,7 @@ export async function buildModel(
   return { ...compiled, businessBasis, ...(designReview ? { designReview } : {}) }
 }
 
-// Compilation is the only mandatory machine-readable boundary.
+// Design remains Markdown; compilation creates the domain model JSON.
 export async function compileModel(
   modelDesign: string,
   narrative: string,
@@ -55,6 +57,7 @@ export async function compileModel(
   options: StageOptions = {},
   businessBasis?: string,
   designReview?: DesignReview,
+  sources?: UnderstandingSources,
 ): Promise<ModelingResult> {
   if (typeof modelDesign !== 'string' || !modelDesign.trim())
     throw new Error('请先完成建模说明。')
@@ -67,6 +70,8 @@ export async function compileModel(
   )
   return { ...compiled, ...(businessBasis !== undefined ? { businessBasis } : {}),
     ...(designReview?.planVersion === artifactVersion(modelDesign) && designReview.narrativeVersion === artifactVersion(narrative) &&
+      (designReview.sourceVersion === undefined || designReview.sourceVersion === businessContextVersion({ narrative, sources })) &&
+      (designReview.acceptance === undefined || designReview.acceptanceVersion === artifactVersion(designReview.acceptance)) &&
       (designReview.businessBasisVersion === undefined || (businessBasis !== undefined && designReview.businessBasisVersion === artifactVersion(businessBasis)))
       ? { designReview } : {}) }
 }

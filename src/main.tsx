@@ -15,7 +15,8 @@ import {
   Send,
   Square,
 } from 'lucide-react'
-import { documentToBlocks, readSse } from './document.ts'
+import { documentToBlocks } from './document.ts'
+import { readSse } from './api/sse.ts'
 import { advanceRevision, freshness, initialRevisions, reviewFreshness } from './workspace.ts'
 import { extractQuestions } from '../shared/questions.ts'
 import BusinessUnderstanding from './components/BusinessUnderstanding.tsx'
@@ -46,8 +47,8 @@ import {
 } from '../shared/analysis.ts'
 import type { ModelOptions, ReasoningEffort } from '../shared/reasoning.ts'
 import { REASONING_LABELS } from '../shared/reasoning.ts'
-import { STAGE_PART_LABELS } from './stage-labels.ts'
 import { designReviewLabel, interruptDesignReview } from '../shared/design-review.ts'
+import { STAGE_PART_LABELS } from './stage-labels.ts'
 import type {
   AnalysisStage,
   DiscussionSubject,
@@ -61,6 +62,13 @@ import type {
 } from './types.ts'
 import { restoreProject } from './persistence.ts'
 import { isStageResult, parseDiscussionEvent } from './responses.ts'
+import {
+  initialModelingStream,
+  reduceModelingEvent,
+  reduceModelingArtifact,
+  reduceModelingPreview,
+  resetModelingPreview,
+} from './features/modeling/modeling-reducer.ts'
 import { isRecord } from './values.ts'
 import { createId } from './id.ts'
 import {
@@ -417,11 +425,12 @@ function App() {
       throw new Error('分析服务返回 HTTP ' + response.status)
     }
     const received: { result?: AnalysisResult } = {}
-    let output = ''
-    let part: import('../shared/analysis.ts').StagePart | '' = ''
+    let streamState = initialModelingStream(stage)
     await readSse(response, (event) => {
       if (controller.signal.aborted)
         throw new DOMException('已停止', 'AbortError')
+      const reduced = reduceModelingEvent(streamState, event)
+      streamState = reduced.state
       if (event.type === 'timing') {
         setJob((current) =>
           current ? { ...current, timing: event.timing } : current,
@@ -449,7 +458,7 @@ function App() {
         })
       }
       if (event.type === 'phase') {
-        addModelActivity(event.text)
+        if (reduced.activity) addModelActivity(reduced.activity)
         if (event.part === 'compile') setProject(current => current.plan && !current.plan.compilation ? ({
           ...current, plan: { ...current.plan, compilation: { text: '', reasoning: '', attempt: 1, status: 'streaming' } },
         }) : current)
@@ -463,6 +472,18 @@ function App() {
             : current,
         )
       }
+      if (event.type === 'reset') {
+        if (reduced.activity) addModelActivity(reduced.activity)
+        setJob(current => current ? { ...current, text: event.text } : current)
+        setProject(current => ({
+          ...current,
+          outputs: { ...current.outputs, [stage]: streamState.output },
+          plan: resetModelingPreview(current.plan, reduced.resetPart),
+        }))
+        if (stage === 'understand') setReadingStream({ narrative: '', reasoning: '', complete: false })
+        if (stage === 'narrate') setNarrationStream({ text: '', reasoning: '' })
+        if (stage === 'assess') setAssessmentStream({ text: '', reasoning: '' })
+      }
       if (event.type === 'delta') {
         if (event.part === 'compile') setProject(current => current.plan ? ({
           ...current, plan: { ...current.plan, compilation: {
@@ -471,110 +492,32 @@ function App() {
             [event.reasoning ? 'reasoning' : 'text']: (current.plan.compilation?.[event.reasoning ? 'reasoning' : 'text'] || '') + event.text,
           } },
         }) : current)
-        if (
-          event.part &&
-          event.part !== part &&
-          (stage === 'model' || stage === 'compile')
-        ) {
-          part = event.part
-          output += '\n\n—— ' + STAGE_PART_LABELS[part] + ' ——\n\n'
-        }
-        output += event.text || ''
         setProject((current) => ({
           ...current,
-          outputs: { ...current.outputs, [stage]: output },
+          outputs: { ...current.outputs, [stage]: streamState.output },
+          plan: reduceModelingPreview(current.plan, event, stage),
         }))
         if (stage === 'understand') {
-          const field = event.reasoning ? 'reasoning' : 'narrative'
-          setReadingStream(current => ({ ...current, [field]: current[field] + event.text }))
+          setReadingStream({ narrative: streamState.reading.text, reasoning: streamState.reading.reasoning,
+            complete: streamState.reading.complete ?? false })
         }
         if (stage === 'narrate') {
-          const field = event.reasoning ? 'reasoning' : 'text'
-          setNarrationStream(current => ({ ...current, [field]: current[field] + event.text }))
+          setNarrationStream({ text: streamState.narration.text, reasoning: streamState.narration.reasoning })
         }
         if (stage === 'assess') {
-          const field = event.reasoning ? 'reasoning' : 'text'
-          setAssessmentStream(current => ({ ...current, [field]: current[field] + event.text }))
-        }
-        if (stage === 'model' && event.part === 'basis') {
-          const field = event.reasoning ? 'businessBasisReasoning' : 'businessBasis'
-          setProject(current => current.plan && !current.plan.businessBasisComplete ? ({
-            ...current, plan: { ...current.plan, [field]: (current.plan[field] || '') + event.text },
-          }) : current)
-        }
-        if (stage === 'model' && event.reasoning && event.part === 'design')
-          setProject(current => current.plan ? ({
-            ...current,
-            plan: { ...current.plan, designReasoning: (current.plan.designReasoning || '') + event.text },
-          }) : current)
-        if (stage === 'model' && event.reasoning && event.part === 'design-check')
-          setProject(current => current.plan ? ({
-            ...current,
-            plan: { ...current.plan, designCheckReasoning: (current.plan.designCheckReasoning || '') + event.text },
-          }) : current)
-        if (!event.reasoning) {
-          if (stage === 'model' && event.part === 'design')
-            setProject((current) => current.plan?.designReview?.status === 'drafting' ? ({
-              ...current, plan: { ...current.plan, designDraft: (current.plan.designDraft || '') + event.text },
-            }) : current.plan && current.plan.businessBasisComplete && !current.plan.complete ? ({
-              ...current,
-              plan: {
-                ...current.plan,
-                plan: (current.plan?.plan || '') + (event.text || ''),
-              },
-            }) : current)
-          if (stage === 'model' && event.part === 'design-check')
-            setProject(current => current.plan?.designReview ? ({
-              ...current, plan: { ...current.plan, designReview: { ...current.plan.designReview,
-                feedbackDraft: (current.plan.designReview.feedbackDraft || '') + event.text } },
-            }) : current)
+          setAssessmentStream({ text: streamState.assessment.text, reasoning: streamState.assessment.reasoning })
         }
       }
       if (event.type === 'design-review') {
-        setProject(current => ({ ...current, plan: {
-          ...(current.plan || { plan: '', complete: false, compiled: false }),
-          designReview: event.review,
-          ...(event.modelDesign !== undefined
-            ? { plan: event.modelDesign, complete: true, compiled: false, designDraft: undefined }
-            : event.review.status === 'drafting' && event.review.round !== current.plan?.designReview?.round
-              ? { designDraft: '', designReasoning: '', designCheckReasoning: '' }
-              : event.review.status === 'checking'
-                ? { designCheckReasoning: '' } : {}),
-        }, revisions: { ...current.revisions, planBasis: basis } }))
+        setProject(current => reduceModelingArtifact(current, event, basis))
       }
       if (event.type === 'business-basis') {
-        addModelActivity('建模依据已生成。')
-        setProject(current => ({ ...current, plan: {
-          ...(current.plan || { plan: '', complete: false, compiled: false }),
-          businessBasis: event.text, businessBasisComplete: true,
-        }, revisions: { ...current.revisions, planBasis: basis } }))
+        addModelActivity(event.revised ? '建模依据已校正，将重新检查设计。' : '建模依据已生成。')
+        setProject(current => reduceModelingArtifact(current, event, basis))
       }
       if (event.type === 'model-design') {
         addModelActivity('设计草案已生成，正在编译候选模型。')
-        setProject((current) =>
-          receiveClarifications(
-            {
-              ...current,
-              plan: {
-                plan: event.modelDesign,
-                designReview: current.plan?.designReview,
-                designDraft: current.plan?.designReview?.reason === 'interrupted' ? current.plan.designDraft : undefined,
-                designReasoning: current.plan?.designReasoning,
-                designCheckReasoning: current.plan?.designCheckReasoning,
-                basis: current.plan?.basis,
-                businessBasis: current.plan?.businessBasis,
-                businessBasisReasoning: current.plan?.businessBasisReasoning,
-                businessBasisComplete: current.plan?.businessBasisComplete,
-                complete: true,
-                compiled: false,
-                warnings: event.warnings,
-              },
-              revisions: { ...current.revisions, planBasis: basis },
-            },
-            event.clarifications,
-            'model',
-          ),
-        )
+        setProject(current => reduceModelingArtifact(current, event, basis))
       }
       if (event.type === 'error') {
         addModelActivity(`任务中断：${event.error || '分析失败'}`)
@@ -644,11 +587,13 @@ function App() {
           ? await runStage('compile', {
               modelDesign: project.plan.plan,
               narrative: project.plan?.basis?.narrative || project.understanding?.narrative || '',
+              sources: project.plan?.basis?.sources,
               businessBasis: project.plan.businessBasis,
               designReview: project.plan.designReview,
             })
           : await runStage('model', {
               narrative: project.understanding?.narrative || '',
+              sources: project.understanding?.sources,
               instruction:
                 project.feedbackDocumentRevision === project.revisions.document
                   ? project.feedback
@@ -673,7 +618,9 @@ function App() {
             plan: {
               plan: result.modelDesign,
               designReview: result.designReview,
-              compilation: current.plan?.compilation,
+              compilation: current.plan?.compilation
+                ? { ...current.plan.compilation, status: 'completed' }
+                : undefined,
               designDraft: result.designReview?.reason === 'interrupted' ? current.plan?.designDraft : undefined,
               designReasoning: current.plan?.designReasoning,
               designCheckReasoning: current.plan?.designCheckReasoning,
@@ -891,6 +838,10 @@ function App() {
       let streamedText = ''
       await readSse<DiscussionEvent>(response, event => {
         if (event.type === 'error') throw new Error(event.error)
+        if (event.type === 'reset') {
+          streamedText = ''
+          setDiscussionStream({ text: '', reasoning: '' })
+        }
         if (event.type === 'result') result = event.text
         if (event.type === 'delta') {
           if (!event.reasoning) streamedText += event.text
@@ -986,7 +937,7 @@ function App() {
       text: stale.plan
         ? '建模依据已变化，这份说明不能直接重试整理，请重新建模。'
         : modelRunning
-          ? project.plan?.designReview && ['drafting', 'checking'].includes(project.plan.designReview.status)
+          ? project.plan?.designReview && ['preparing-checks', 'drafting', 'checking', 'repairing-basis'].includes(project.plan.designReview.status)
             ? `完整设计已保留，${designReviewLabel(project.plan.designReview)}。`
             : '设计草案已生成，正在整理候选模型。'
           : '建模说明已保留，候选模型尚未更新。',

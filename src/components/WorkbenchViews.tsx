@@ -14,6 +14,7 @@ import { SourceCatalogue } from './SourceReferences.tsx'
 export { default as Markdown } from './Markdown.tsx'
 import { modelingContent } from '../../shared/clarifications.ts'
 import { designReviewLabel } from '../../shared/design-review.ts'
+import { acceptanceMarkdown } from '../../shared/design-acceptance.ts'
 import QQDocEditor from 'qq-doc-clone'
 import ModelGraph from './ModelGraph.tsx'
 import CompilationStream from './CompilationStream.tsx'
@@ -350,15 +351,22 @@ export function CandidateView({
                   : '开始建模后，这里会解释模型的设计取舍。'}
             </div>
           )}
-          {plan?.designReview && <details className="reading-note design-review" open={plan.designReview.status === 'checking' || plan.designReview.status === 'attention'}>
+          {plan?.designReview && <details className="reading-note design-review" open={['preparing-checks', 'checking', 'repairing-basis', 'attention'].includes(plan.designReview.status)}>
             <summary>{designReviewLabel(plan.designReview)} · 已检查 {plan.designReview.rounds.length} 轮</summary>
-            <p className="muted">{plan.designReview.businessBasisVersion
-              ? '沿用本轮建模依据中的业务案例，复查修订后的表达；通过仅针对本轮案例，不代表业务已穷尽。'
+            <p className="muted">{plan.designReview.sourceVersion
+              ? '对照本轮业务来源核查依据、必要信息与案例覆盖；通过仅针对报告说明的范围，不代表业务已穷尽。'
             : '检查结论只针对本轮建模依据中的具体情形，不代表业务已穷尽。'}</p>
+            {plan.designReview.failure && <p className="muted">未完成原因：{plan.designReview.failure}</p>}
+            {plan.designReview.acceptance && <details>
+              <summary>本次业务验收问题 · {plan.designReview.acceptance.questions.length} 项</summary>
+              <Markdown>{acceptanceMarkdown(plan.designReview.acceptance)}</Markdown>
+            </details>}
             {plan.designReview.rounds.map((round, index) => <section key={index}>
               <strong>第 {index + 1} 轮表达检查</strong>
               <Markdown>{round.feedback}</Markdown>
               <details><summary>本轮检查的设计</summary><Markdown>{round.design}</Markdown></details>
+              {round.businessBasis && <details><summary>本轮检查采用的依据</summary><Markdown>{round.businessBasis}</Markdown></details>}
+              {round.rawReport && <details><summary>未通过校验的原始检查报告</summary><pre>{round.rawReport}</pre></details>}
             </section>)}
             {plan.designReview.feedbackDraft && <section>
               <strong>{plan.designReview.status === 'checking' ? '当前检查意见' : '未完成的检查意见'}</strong>
@@ -366,8 +374,8 @@ export function CandidateView({
             </section>}
             {plan.designCheckReasoning && <section>
               <ReasoningStream text={plan.designCheckReasoning}
-                active={!!running && progress.active?.id === 'decisions' && plan.designReview.status === 'checking' && !plan.designReview.feedbackDraft}
-                complete={plan.designReview.status !== 'checking'} />
+                active={!!running && progress.active?.id === 'decisions' && ['preparing-checks', 'checking'].includes(plan.designReview.status) && !plan.designReview.feedbackDraft}
+                complete={!['preparing-checks', 'checking'].includes(plan.designReview.status)} />
             </section>}
           </details>}
           {plan?.designDraft && plan.designReview?.status === 'attention' && <details className="reading-note">

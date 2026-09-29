@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { Agent, type AgentTool } from '@earendil-works/pi-agent-core'
 import { Type } from '@earendil-works/pi-ai'
 import type { ProviderEvent } from '../../shared/analysis.ts'
-import { createGlmProvider } from './glm.ts'
+import { createGlmProvider, glmDnsResultOrder } from './glm.ts'
 import { createPiModel, createPiStream } from './pi.ts'
 import { resolveProvider } from './index.ts'
 import { runPiText } from '../agents/pi-text.ts'
@@ -28,7 +28,7 @@ test('GLM loads its own key lazily, uses coding-plan defaults and streams JSON s
     auth: 'Bearer glm-test-key',
     body: {
       model: 'glm-5.3-flash', stream: true,
-      max_tokens: 32768, reasoning_effort: 'max',
+      reasoning_effort: 'max',
       thinking: { type: 'enabled', clear_thinking: false },
       temperature: 1, top_p: 0.95,
       response_format: { type: 'json_object' },
@@ -48,7 +48,7 @@ test('GLM loads its own key lazily, uses coding-plan defaults and streams JSON s
   assert.equal(requests[1].url, 'https://glm.invalid/v4/chat/completions')
   assert.equal(requests[1].body.model, 'glm-5.3-flashx')
   assert.equal(requests[1].body.reasoning_effort, 'low')
-  assert.equal(requests[1].body.max_tokens, 4096)
+  assert.equal(requests[1].body.max_tokens, undefined)
 })
 
 test('GLM rejects missing credentials and unsupported thinking/output settings before sending a request', async () => {
@@ -57,13 +57,18 @@ test('GLM rejects missing credentials and unsupported thinking/output settings b
   for (const [config, error] of [
     [{ GLM_REASONING_EFFORT: 'minimal' }, /GLM_REASONING_EFFORT/],
     [{ GLM_REASONING_EFFORT: 'none' }, /GLM_REASONING_EFFORT/],
-    [{ GLM_MAX_OUTPUT_TOKENS: '0' }, /GLM_MAX_OUTPUT_TOKENS/],
-    [{ GLM_MAX_OUTPUT_TOKENS: '131073' }, /GLM_MAX_OUTPUT_TOKENS/],
   ] as const) {
     const env = { GLM_API_KEY: 'test', ...config }
     await assert.rejects(createGlmProvider(neverFetch, env)('input', {}), error)
     assert.throws(() => createPiModel('glm', env), error)
   }
+})
+
+test('GLM defaults to IPv4 DNS order and validates an explicit route preference', () => {
+  assert.equal(glmDnsResultOrder({}), 'ipv4first')
+  assert.equal(glmDnsResultOrder({ GLM_DNS_RESULT_ORDER: 'ipv6first' }), 'ipv6first')
+  assert.equal(glmDnsResultOrder({ GLM_DNS_RESULT_ORDER: 'verbatim' }), 'verbatim')
+  assert.throws(() => glmDnsResultOrder({ GLM_DNS_RESULT_ORDER: 'random' }), /GLM_DNS_RESULT_ORDER/)
 })
 
 test('GLM Pi loop streams tool arguments and replays original reasoning and tool output with auto choice on retries', async () => {
@@ -115,7 +120,7 @@ test('GLM Pi loop streams tool arguments and replays original reasoning and tool
     assert.equal(request.tool_choice, 'auto')
     assert.equal(request.tool_stream, true)
     assert.equal(request.reasoning_effort, 'high')
-    assert.equal(request.max_tokens, 32768)
+    assert.equal(request.max_tokens, undefined)
     assert.equal(request.max_completion_tokens, undefined)
     assert.deepEqual(request.thinking, { type: 'enabled', clear_thinking: false })
     assert.equal(request.messages[0].role, 'system')
@@ -217,6 +222,24 @@ test('Pi understanding returns text without automatic review or a finish tool ha
   assert.equal(request.messages.some((message: any) => message.role === 'tool'), false)
 })
 
+test('Pi text retries after thinking and resets the reading stream before publishing fresh content', async t => {
+  const previous = process.env.GLM_API_KEY
+  process.env.GLM_API_KEY = 'retry-test'
+  t.after(() => { if (previous === undefined) delete process.env.GLM_API_KEY; else process.env.GLM_API_KEY = previous })
+  let calls = 0
+  const events: ProviderEvent[] = []
+  t.mock.method(globalThis, 'fetch', async () => ++calls === 1
+    ? new Response(frame({ reasoning_content: '失败思考' }))
+    : new Response(frame({ content: '最终整理稿' }, 'stop') + done))
+  const text = await runPiText('整理业务说明', 'reading', { provider: 'glm', onEvent: event => {
+    if (event.type === 'reset') assert.equal(event.part, 'reading')
+    events.push(event as ProviderEvent)
+  } })
+  assert.equal(text, '最终整理稿')
+  assert.equal(calls, 2)
+  assert.deepEqual(events.filter(e => e.type === 'delta' || e.type === 'reset').map(e => e.type), ['delta', 'reset', 'delta'])
+})
+
 test('shared Pi adapter preserves existing providers’ tool handoff request parameters', async () => {
   const env = {
     LLM_API_KEY: 'ds-test', LLM_API_URL: 'https://deepseek.invalid/v1', LLM_MODEL: 'deepseek-chat',
@@ -238,7 +261,7 @@ test('shared Pi adapter preserves existing providers’ tool handoff request par
     const message = await output.result()
     assert.equal(message.stopReason, 'stop')
     assert.equal(body.tool_choice, 'required')
-    assert.equal(body.max_tokens ?? body.max_completion_tokens, 24000)
+    assert.equal(body.max_tokens ?? body.max_completion_tokens, undefined)
     assert.equal(body.reasoning_effort, undefined)
     assert.equal(body.tool_stream, undefined)
     assert.deepEqual(body.thinking, provider === 'deepseek' ? { type: 'disabled' } : undefined)

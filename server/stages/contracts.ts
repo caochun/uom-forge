@@ -9,7 +9,7 @@ export interface StageAgents {
     runTurn: RunTurn,
     options: StageOptions,
     businessBasis: string,
-  ) => Promise<{ modelDesign: string; designReview: DesignReview }>
+  ) => Promise<{ modelDesign: string; designReview: DesignReview; businessBasis?: string }>
 }
 
 export interface StageOptions extends Omit<TurnOptions, 'onEvent'> {

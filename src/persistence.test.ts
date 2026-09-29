@@ -8,6 +8,7 @@ import { freshness } from './workspace.ts'
 import { extractUnderstandingSources } from '../shared/understanding-sources.ts'
 import { artifactVersion } from '../shared/workflow.ts'
 import { prepareCompilationRetry } from './modeling-progress.ts'
+import type { DesignAcceptance, DesignCheckReport } from '../shared/design-acceptance.ts'
 
 const empty: Project = {
   version: 4,
@@ -24,6 +25,24 @@ const empty: Project = {
   revisions: initialRevisions,
   messages: [],
 }
+test('fixed questions, validated reports and invalid raw reports survive storage without becoming design content', () => {
+  const acceptance: DesignAcceptance = { scope: '成果归属', scenario: '假设两次事项分别产生各自成果。', outcome: '每份成果可明确归属产生它的事项。', questions: [{ id: 'Q1', question: '成果属于哪次事项？', kind: 'result', grounding: 'explicit',
+    sourceQuote: '事项产生各自成果。', reason: '需要区分归属。', expected: '每份成果能关联产生它的事项。' }] }
+  const report: DesignCheckReport = { summary: '归属未表达。', answers: [{ questionId: 'Q1', status: 'gap', sourceQuote: '事项产生各自成果。',
+    evidence: [], scenario: '假设两次事项分别产生结果。', result: '结果无法区分归属。', gap: '补充成果归属。' }], issues: [] }
+  const stored: Project = { ...empty, plan: { plan: '完整设计', complete: true, compiled: false,
+    designReview: { status: 'attention', reason: 'unrecognized', round: 2, acceptance, acceptanceVersion: artifactVersion(acceptance), rounds: [
+      { design: '旧设计', feedback: '缺少归属', verdict: 'revise', report },
+      { design: '完整设计', feedback: '报告未通过校验', verdict: 'unknown', rawReport: '{"answers":[]}', validationError: '漏项' },
+    ] },
+  } }
+  const restored = restoreProject(JSON.parse(JSON.stringify(stored)), empty)
+  assert.deepEqual(restored.plan?.designReview, stored.plan?.designReview)
+  assert.equal(restored.plan?.plan, '完整设计')
+  const preparing = restoreProject({ ...stored, plan: { ...stored.plan, designReview: { status: 'preparing-checks', round: 0, rounds: [], acceptance } } }, empty)
+  assert.equal(preparing.plan?.designReview?.reason, 'interrupted')
+  assert.deepEqual(preparing.plan?.designReview?.acceptance, acceptance)
+})
 test('partial compilation output survives reload without becoming a candidate, and retry starts a fresh stream', () => {
   const stored: Project = { ...empty, plan: {
     plan: '已完成设计', complete: true, compiled: false,

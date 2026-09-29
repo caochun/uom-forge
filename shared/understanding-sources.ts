@@ -2,7 +2,7 @@ import type { BusinessDocument, UnderstandingSources } from './analysis.ts'
 import { withoutQuestionSection } from './questions.ts'
 
 // A citation belongs to one complete Markdown line/paragraph. The clean text
-// remains the sole downstream input to modeling; IDs are provenance metadata.
+// and original blocks travel together; IDs are provenance, not proof of an interpretation.
 const marker = /\[\[source:([^\]\r\n]*)\]\]/g
 export const SOURCE_INSTRUCTIONS = `原文溯源：
 - 整理稿中每个有原文依据的段落、列表项或表格行，行末追加 [[source:原文块id]]。
@@ -64,15 +64,13 @@ export function extractUnderstandingSources(
       return passage
     })
     .join('\n')
-  const used = new Set(citations.flatMap((citation) => citation.blockIds))
   return {
     narrative,
     sources: readUnderstandingSources(
       {
         documentName: document.name,
-        blocks: document.blocks
-          .filter((block) => used.has(block.id))
-          .map((block) => ({ ...block })),
+        complete: true,
+        blocks: document.blocks.map((block) => ({ ...block })),
         citations,
       } satisfies UnderstandingSources,
       narrative,
@@ -147,6 +145,7 @@ export function readUnderstandingSources(
   }
   return {
     documentName: data.documentName,
+    ...(data.complete === true ? { complete: true } : {}),
     blocks: [...blocks.values()],
     citations,
   }
@@ -173,6 +172,7 @@ export function reviseUnderstandingSources(
   )
   return {
     documentName: retained?.documentName || '',
+    ...(retained?.complete ? { complete: true } : {}),
     blocks: retained?.blocks || [],
     citations: [
       ...(retained?.citations || []),

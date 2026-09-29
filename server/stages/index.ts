@@ -23,6 +23,7 @@ export async function runStage(
       return buildModel(
         {
           narrative: request.narrative,
+          sources: request.sources,
           currentModel: request.model,
           feedback: request.instruction,
         },
@@ -37,6 +38,7 @@ export async function runStage(
         configured,
         request.businessBasis,
         request.designReview,
+        request.sources,
       )
     case 'narrate':
       return narrateModel(request.model, runTurn, configured)

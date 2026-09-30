@@ -996,7 +996,7 @@ function App() {
           <div className="brand-mark">
             <Network size={21} />
           </div>
-          <strong>领域建模工作台</strong>
+          <strong>织知 · 领域建模工作台</strong>
           <span
             className="app-version"
             title={`版本 ${__APP_VERSION__}\n提交 ${__APP_COMMIT__}\n提交时间 ${__APP_COMMIT_TIME__}\n构建时间 ${__APP_BUILD_TIME__}\n环境 ${__APP_ENV__}`}
